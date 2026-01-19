@@ -16,12 +16,13 @@ git clone https://github.com/ktiyab/babel-tool.git
 cd babel-tool && ./install.sh
 ```
 
-**Then, only 3 commands to start:**
+**Then, only 4 commands to start:**
 
 ```bash
 babel prompt --install              # Once: teach your AI
 babel init "Detailed information about your project purpose" \
- --need "Detailed information on the need/friction that led to the project"
+ --need "Detailed information on the need/friction that led to the project" # Once: to initialized your project
+babel status                        # Periodically: See project purpose and key decisions
 babel review                        # Periodically: validate AI proposals
 ```
 
