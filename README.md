@@ -19,8 +19,8 @@ cd babel-tool && ./install.sh
 **Then, only 3 commands to start:**
 
 ```bash
-babel init "Your project purpose"   # Once: initialize
 babel prompt --install              # Once: teach your AI
+babel init "Your project purpose"   # Once: initialize
 babel review                        # Periodically: validate AI proposals
 ```
 
