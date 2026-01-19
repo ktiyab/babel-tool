@@ -1,6 +1,6 @@
 # Babel — Intent Preservation for Code
 
-> *AI-native knowledge system. Captures reasoning. Answers 'why?'. Works through your AI assistant.*
+> *AI-native knowledge system. Captures reasoning. Answers 'why?'. Your AI assistant runs it—you review.*
 
 [![Alpha](https://img.shields.io/badge/status-alpha-orange)](https://github.com/ktiyab/babel-tool)
 [![Python 3.9+](https://img.shields.io/badge/python-3.9+-blue)](https://www.python.org/downloads/)
@@ -86,7 +86,7 @@ babel why "database"
 
 ## AI-Native Design
 
-**Babel is built for AI assistants to use on your behalf.**
+**Babel is an AI memory system with human governance. Your AI assistant is the primary operator—running commands, proposing captures, querying context. You review and approve. This inverts the typical tool relationship.**
 
 You *can* run `babel` commands directly. But mostly, you won't need to. Your AI assistant reads Babel's knowledge and acts accordingly — suggesting captures, checking context, warning about conflicts.
 
@@ -1208,7 +1208,7 @@ These relations enable:
 
 **Meta-principle: Low Friction**
 
-If capturing knowledge is hard, people won't do it. Babel is designed so that:
+If capturing knowledge is hard, AI assistants won't do it consistently. Babel makes the right behavior easy for your AI—and invisible to you. Babel is designed so that:
 - Doing the right thing is easier than skipping it
 - AI handles the overhead
 - Commands are optional, not required
