@@ -1,0 +1,105 @@
+# Babel Tool - Continuous Integration
+#
+# Runs on:
+#   - Push to main branch
+#   - Pull requests to main branch
+#
+# Checks:
+#   - Syntax validation
+#   - Unit tests (pytest)
+#   - Package installation
+#   - Multi-Python version compatibility
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    name: Test Python ${{ matrix.python-version }}
+    runs-on: ubuntu-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.9', '3.11', '3.12']
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Cache pip dependencies
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ matrix.python-version }}-${{ hashFiles('pyproject.toml') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-${{ matrix.python-version }}-
+            ${{ runner.os }}-pip-
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+
+      - name: Check syntax
+        run: |
+          python -m py_compile babel/cli.py
+          python -m compileall babel/ -q
+
+      - name: Run tests
+        run: |
+          pytest tests/ -v --tb=short
+
+  install:
+    name: Verify Installation
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Test pip install
+        run: |
+          python -m pip install --upgrade pip
+          pip install .
+
+      - name: Smoke test
+        run: |
+          babel --help
+          babel principles
+
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install ruff
+        run: pip install ruff
+
+      - name: Run ruff
+        run: |
+          ruff check babel/ --select=E,F,W --ignore=E501 --output-format=github
+        continue-on-error: true  # Don't fail build on lint warnings initially

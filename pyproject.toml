@@ -1,0 +1,67 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "babel-tool"
+version = "0.1.0-alpha.20260119"
+description = "Babel — Reasoning programing."
+readme = "README.md"
+requires-python = ">=3.9"
+license = {text = "MIT"}
+authors = [
+    {name = "Babel Team"}
+]
+keywords = ["babel", "intent", "reasoning", "documentation", "ai", "collaboration"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+]
+
+dependencies = [
+    "pyyaml>=6.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+    "pytest-cov>=4.0",
+]
+claude = [
+    "anthropic>=0.18.0",
+]
+openai = [
+    "openai>=1.0.0",
+]
+gemini = [
+    "google-generativeai>=0.3.0",
+]
+all = [
+    "babel-tool[claude,openai,gemini]",
+]
+
+[project.scripts]
+babel = "babel.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/ktiyab/babel-tool"
+Documentation = "https://github.com/ktiyab/babel-tool#readme"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["babel*"]
+
+[tool.setuptools.package-data]
+babel = ["templates/*.md"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_functions = ["test_*"]
+addopts = "-v --tb=short"
