@@ -6,9 +6,12 @@
 #
 # Checks:
 #   - Syntax validation
-#   - Unit tests (pytest)
+#   - Unit tests (pytest) - integration tests auto-skipped via GITHUB_ACTIONS env
 #   - Package installation
 #   - Multi-Python version compatibility
+#
+# Note: Integration tests (test_whitepaper_principles.py) require real .babel/ data
+# and are automatically skipped when GITHUB_ACTIONS=true (set by GitHub)
 
 name: CI
 

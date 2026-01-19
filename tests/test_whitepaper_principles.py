@@ -10,6 +10,10 @@ Tests invoke `babel` commands and observe outcomes through CLI output.
 TESTING APPROACH: Tests run against REAL tower/.babel data, not synthetic temp projects.
 This validates that principles are embodied in actual usage, not just happy-path simulations.
 
+NOTE: These are INTEGRATION tests that require a real .babel/ directory with data.
+They are skipped on CI (GitHub Actions) where no .babel/ exists.
+Run locally in tower/ for full dogfooding validation.
+
 Implemented Principles (tested here):
 - P1: Bootstrap from Need
 - P2: Emergent Ontology
@@ -30,6 +34,12 @@ import pytest
 import subprocess
 import os
 from pathlib import Path
+
+# Skip entire module on CI (no .babel/ directory available)
+pytestmark = pytest.mark.skipif(
+    os.environ.get("CI") == "true" or os.environ.get("GITHUB_ACTIONS") == "true",
+    reason="Integration tests require .babel/ directory (skipped on CI)"
+)
 
 
 # Real project directory (tower/)
