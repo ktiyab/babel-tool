@@ -11,18 +11,24 @@
 ## Quick Install
 
 ```bash
-# Clone and install
+# Install
 git clone https://github.com/ktiyab/babel-tool.git
-cd babel-tool
-./install.sh
-
-# Verify
-babel --help
+cd babel-tool && ./install.sh
 ```
 
-**Requirements:** Python 3.9+
+**Then, only 3 commands to start:**
 
-**Alternative methods:** See [Installation & Configuration](#installation--configuration) below.
+```bash
+babel init "Your project purpose"   # Once: initialize
+babel prompt --install              # Once: teach your AI
+babel review                        # Periodically: validate AI proposals
+```
+
+That's it. Your AI assistant handles the 30+ commands—you just review.
+
+> **Other AIs?** `babel prompt --install` auto-configures Claude Code and Cursor. For others, use `babel prompt > /path/to/ai/instructions.md` to write the prompt directly to the path expected by your AI.
+
+**Requirements:** Python 3.9+ • **More options:** [Installation & Configuration](#installation--configuration)
 
 ---
 
@@ -57,6 +63,18 @@ Code tells WHAT exists.
 Git tells WHEN it changed.
 Babel tells WHY it's there.
 ```
+
+> **You don't need to learn 30+ commands.**
+>
+> Babel is an AI memory system with human governance. Your AI assistant operates it. You just need 3 commands:
+>
+> | Command | When | What it does |
+> |---------|------|--------------|
+> | `babel init` | Once | Start a project |
+> | `babel prompt --install` | Once | Teach your AI about Babel |
+> | `babel review` | Periodically | Validate AI proposals |
+>
+> That's it. The AI handles everything else.
 
 **Simple workflow:**
 
@@ -319,20 +337,42 @@ babel status    # Quick overview
 babel scan      # AI-powered analysis
 ```
 
-### 6. (Optional) Connect your AI assistant
+### 6. Connect your AI assistant
 
 ```bash
-babel prompt    # Outputs system prompt for AI
+babel prompt --install    # Installs system prompt for your IDE
 ```
 
-Copy this to your AI assistant's custom instructions. Now your AI:
+This teaches your AI assistant all 30+ Babel commands. Now your AI:
 - Suggests capturing decisions when you explain them
 - Checks Babel context before answering questions
 - Warns you about constraint conflicts
+- Handles edge cases, resolves problems, gathers information
+- Summarizes and provides meaningful insights
+- Queues proposals for your review
 
 **That's it.** You're using Babel.
 
-Everything else is optional. Babel works quietly in the background — directly via commands, or through your AI assistant.
+### Why 30+ commands?
+
+The 30+ commands are a **contract for the AI**, not a learning curve for you.
+
+```
+You speak naturally → AI runs the right command → AI informs you → You decide
+```
+
+| AI Capability | Commands It Uses |
+|---------------|------------------|
+| Query context | `why`, `list`, `status`, `history` |
+| Capture decisions | `capture`, `question`, `memo` |
+| Detect problems | `coherence`, `tensions`, `check` |
+| Resolve conflicts | `challenge`, `evidence`, `resolve` |
+| Strengthen decisions | `endorse`, `evidence-decision` |
+| Connect artifacts | `link`, `suggest-links`, `gaps` |
+
+**Everything is conversational.** You say "why did we choose SQLite?" — the AI runs `babel why "SQLite"` and explains. You make a decision — the AI captures it and queues for your review. You just run `babel review` when convenient.
+
+The commands exist so the AI can handle any situation at scale and speed. You don't need to learn them.
 
 ---
 
