@@ -20,7 +20,8 @@ cd babel-tool && ./install.sh
 
 ```bash
 babel prompt --install              # Once: teach your AI
-babel init "Your project purpose"   # Once: initialize
+babel init "Detailed information about your project purpose" \
+ --need "Detailed information on the need/friction that led to the project"
 babel review                        # Periodically: validate AI proposals
 ```
 
