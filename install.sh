@@ -19,7 +19,6 @@ set -e
 # Configuration
 # -----------------------------------------------------------------------------
 
-VERSION="0.1.0-alpha.20260119"
 DEFAULT_INSTALL_DIR="$HOME/.babel-tool"
 DEFAULT_BIN_DIR="$HOME/.local/bin"
 INSTALL_DIR=""
@@ -54,6 +53,21 @@ log_warn() {
 
 log_error() {
     echo -e "${RED}[ERROR]${NC} $1"
+}
+
+get_source_version() {
+    # Extract version from babel/__init__.py (single source of truth)
+    local init_file="$SCRIPT_DIR/babel/__init__.py"
+    if [ -f "$init_file" ]; then
+        grep -oP '__version__\s*=\s*"\K[^"]+' "$init_file" 2>/dev/null || echo "unknown"
+    else
+        echo "unknown"
+    fi
+}
+
+get_installed_version() {
+    # Get version from installed babel command
+    "$INSTALL_DIR/venv/bin/babel" --version 2>/dev/null | awk '{print $2}' || echo "unknown"
 }
 
 # -----------------------------------------------------------------------------
@@ -218,14 +232,29 @@ create_symlink() {
 }
 
 save_version_info() {
+    local installed_version
+    installed_version=$(get_installed_version)
     cat > "$INSTALL_DIR/version" << EOF
-version=$VERSION
+version=$installed_version
 installed=$(date -Iseconds)
 install_dir=$INSTALL_DIR
 bin_dir=$BIN_DIR
 source=$SCRIPT_DIR
 EOF
     log_success "Version info saved"
+}
+
+copy_env_example() {
+    # Copy .env.example to installation directory for user reference
+    local env_example="$SCRIPT_DIR/.env.example"
+    local dest_env_example="$INSTALL_DIR/.env.example"
+
+    if [ -f "$env_example" ]; then
+        cp "$env_example" "$dest_env_example"
+        log_success "Configuration template copied: $dest_env_example"
+    else
+        log_warn ".env.example not found in source directory"
+    fi
 }
 
 check_path() {
@@ -260,9 +289,12 @@ verify_installation() {
 main() {
     parse_args "$@"
 
+    local source_version
+    source_version=$(get_source_version)
+
     echo ""
     echo "=========================================="
-    echo "  Babel Tool Installer v$VERSION"
+    echo "  Babel Tool Installer v$source_version"
     echo "=========================================="
     echo ""
     echo "  Repository: $REPO_URL"
@@ -276,6 +308,7 @@ main() {
     install_package
     create_symlink
     save_version_info
+    copy_env_example
     verify_installation
 
     echo ""
@@ -290,6 +323,11 @@ main() {
     echo "    babel --help          # Show help"
     echo "    babel init \"Project\" # Initialize in a project"
     echo "    babel status          # Check project status"
+    echo ""
+    echo "  Configuration:"
+    echo "    Copy .env.example to configure LLM provider:"
+    echo "    cp $INSTALL_DIR/.env.example ~/.babel/.env"
+    echo "    # Edit ~/.babel/.env with your API key or local LLM settings"
     echo ""
     echo "  To uninstall:"
     echo "    ./uninstall.sh"

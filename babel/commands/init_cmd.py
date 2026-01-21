@@ -58,6 +58,9 @@ class InitCommand(BaseCommand):
         # Copy system prompt template to project root
         self._install_system_prompt()
 
+        # Ensure .env files are protected from git (security: credential protection)
+        env_patterns_added, gitignore_message = self._ensure_gitignore_protection()
+
         # Auto-detect IDE and install LLM-specific prompt
         ide_type, ide_message = self._install_llm_prompt()
 
@@ -84,6 +87,11 @@ class InitCommand(BaseCommand):
         print(f"\nLLM integration:")
         print(f"  {ide_message}")
 
+        # Show security status
+        if env_patterns_added:
+            print(f"\nSecurity:")
+            print(f"  {gitignore_message} (prevents credential leakage)")
+
         # Succession hint (centralized)
         from ..output import end_command
         end_command("init", {})
@@ -105,6 +113,51 @@ class InitCommand(BaseCommand):
         if path.exists():
             return
         path.write_text(MINIMAL_SYSTEM_PROMPT)
+
+    def _ensure_gitignore_protection(self) -> tuple:
+        """
+        Ensure .env files are excluded from git to prevent credential leakage.
+
+        Security: Adds .env patterns to .gitignore if not already present.
+        This is secure-by-default behavior - users who want .env committed
+        can remove the entries (rare, discouraged).
+
+        Returns:
+            Tuple of (entries_added: list, message: str)
+        """
+        gitignore_path = self.project_dir / ".gitignore"
+
+        # Patterns to protect (NOT .env.example - that's a template)
+        env_patterns = [".env", ".env.local", ".env*.local"]
+
+        # If no .gitignore exists, create one with env patterns
+        if not gitignore_path.exists():
+            content = "# Environment files (contain secrets - never commit)\n"
+            content += "\n".join(env_patterns) + "\n"
+            gitignore_path.write_text(content)
+            return env_patterns, "Created .gitignore with credential protection"
+
+        # Read existing .gitignore
+        existing_content = gitignore_path.read_text()
+        existing_lines = set(line.strip() for line in existing_content.splitlines())
+
+        # Find patterns not yet excluded
+        missing_patterns = [p for p in env_patterns if p not in existing_lines]
+
+        if not missing_patterns:
+            return [], "Credential protection already in .gitignore"
+
+        # Append missing patterns
+        addition = "\n# Environment files (contain secrets - never commit)\n"
+        addition += "\n".join(missing_patterns) + "\n"
+
+        with open(gitignore_path, "a") as f:
+            # Ensure we start on a new line
+            if existing_content and not existing_content.endswith("\n"):
+                f.write("\n")
+            f.write(addition)
+
+        return missing_patterns, f"Added {', '.join(missing_patterns)} to .gitignore"
 
     def _install_llm_prompt(self):
         """

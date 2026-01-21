@@ -60,6 +60,7 @@ from .commands.suggest_links import SuggestLinksCommand
 from .commands.gaps import GapsCommand
 from .preferences import MemoManager
 from .content import HELP_TEXT, PRINCIPLES_TEXT
+from . import __version__
 
 
 class IntentCLI:
@@ -677,6 +678,12 @@ def main():
         '--project', '-p',
         default='.',
         help='Project directory (default: current)'
+    )
+
+    parser.add_argument(
+        '--version', '-V',
+        action='version',
+        version=f'babel {__version__}'
     )
 
     subparsers = parser.add_subparsers(dest='command', help='Commands')

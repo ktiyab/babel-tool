@@ -4,11 +4,16 @@ Configuration — Centralized settings management
 Config hierarchy (highest to lowest priority):
   1. Project config (.babel/config.yaml)
   2. User config (~/.babel/config.yaml)
-  3. Environment variables
+  3. Environment variables (including .env file)
   4. Defaults
 
 API keys are NEVER stored in config files.
-They must be provided via environment variables.
+They must be provided via environment variables or .env file.
+
+.env file loading:
+  - Automatic if python-dotenv is installed (pip install python-dotenv)
+  - Searches: current directory, project root, user home (~/.babel/.env)
+  - See .env.example for available configuration options
 """
 
 import os
@@ -20,8 +25,55 @@ from typing import Optional, Dict, Any
 from .presentation.symbols import get_symbols
 
 
+def _load_dotenv():
+    """
+    Attempt to load .env files using python-dotenv.
+
+    Searches for .env in (order of priority):
+      1. Current working directory
+      2. Project root (containing .babel/)
+      3. User config directory (~/.babel/.env)
+
+    Gracefully does nothing if python-dotenv is not installed.
+    """
+    try:
+        from dotenv import load_dotenv
+    except ImportError:
+        # python-dotenv not installed - continue without .env loading
+        return
+
+    # Search paths for .env files (later paths override earlier)
+    search_paths = []
+
+    # User config directory
+    user_env = Path.home() / ".babel" / ".env"
+    if user_env.exists():
+        search_paths.append(user_env)
+
+    # Project root (look for .babel/ directory)
+    cwd = Path.cwd()
+    if (cwd / ".babel").exists():
+        project_env = cwd / ".env"
+        if project_env.exists():
+            search_paths.append(project_env)
+
+    # Current directory (highest priority)
+    cwd_env = cwd / ".env"
+    if cwd_env.exists() and cwd_env not in search_paths:
+        search_paths.append(cwd_env)
+
+    # Load .env files (later files override earlier ones)
+    for env_path in search_paths:
+        load_dotenv(env_path, override=True)
+
+
+# Auto-load .env files at module import
+_load_dotenv()
+
+
 # Supported providers and their defaults
 # Categories: Large/Powerful | Balanced | Lightweight/Cost-Efficient
+# Local providers have env_key=None and is_local=True
 PROVIDERS = {
     "claude": {
         "env_key": "ANTHROPIC_API_KEY",
@@ -35,7 +87,8 @@ PROVIDERS = {
             # Lightweight / Cost-Efficient
             "claude-3-7-sonnet-20250219",
             "claude-3-5-haiku-20241022"
-        ]
+        ],
+        "is_local": False
     },
     "openai": {
         "env_key": "OPENAI_API_KEY",
@@ -49,7 +102,8 @@ PROVIDERS = {
             "gpt-5-mini",
             # Lightweight / Cost-Efficient
             "gpt-5-nano"
-        ]
+        ],
+        "is_local": False
     },
     "gemini": {
         "env_key": "GOOGLE_API_KEY",
@@ -63,7 +117,15 @@ PROVIDERS = {
             # Lightweight / Cost-Efficient
             "gemini-2.5-flash-lite",
             "gemini-2.5-flash-image"
-        ]
+        ],
+        "is_local": False
+    },
+    "ollama": {
+        "env_key": None,  # No API key needed for local LLM
+        "default_model": "llama3.2",
+        "default_base_url": "http://localhost:11434",
+        "models": [],  # Dynamic - any installed model works
+        "is_local": True
     }
 }
 
@@ -75,40 +137,58 @@ class LLMConfig:
     """LLM provider configuration."""
     provider: str = DEFAULT_PROVIDER
     model: Optional[str] = None  # None = use provider default
-    
+    base_url: Optional[str] = None  # Optional override for local LLM endpoint
+
     @property
     def effective_model(self) -> str:
         """Get model, falling back to provider default."""
         if self.model:
             return self.model
         return PROVIDERS.get(self.provider, {}).get("default_model", "")
-    
+
+    @property
+    def effective_base_url(self) -> Optional[str]:
+        """Get base URL, falling back to provider default."""
+        if self.base_url:
+            return self.base_url
+        return PROVIDERS.get(self.provider, {}).get("default_base_url")
+
     @property
     def api_key_env(self) -> str:
         """Get environment variable name for API key."""
-        return PROVIDERS.get(self.provider, {}).get("env_key", "")
-    
+        return PROVIDERS.get(self.provider, {}).get("env_key") or ""
+
     @property
     def api_key(self) -> Optional[str]:
         """Get API key from environment. Never stored."""
+        if not self.api_key_env:
+            return None
         return os.environ.get(self.api_key_env)
-    
+
+    @property
+    def is_local(self) -> bool:
+        """Check if this is a local provider (no external API)."""
+        return PROVIDERS.get(self.provider, {}).get("is_local", False)
+
     @property
     def is_available(self) -> bool:
-        """Check if provider is configured and available."""
+        """Check if provider is configured. For local, always True (runtime check needed)."""
+        if self.is_local:
+            return True  # Local availability checked at runtime by provider
         return bool(self.api_key)
-    
+
     def validate(self) -> Optional[str]:
         """Validate config. Returns error message or None if valid."""
         if self.provider not in PROVIDERS:
             valid = ", ".join(PROVIDERS.keys())
             return f"Unknown provider '{self.provider}'. Valid: {valid}"
-        
-        if self.model:
+
+        # Skip model validation for local providers (models are dynamic/user-installed)
+        if self.model and not self.is_local:
             valid_models = PROVIDERS[self.provider]["models"]
             if self.model not in valid_models:
                 return f"Unknown model '{self.model}' for {self.provider}. Valid: {', '.join(valid_models)}"
-        
+
         return None
 
 
@@ -153,11 +233,16 @@ class Config:
     
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for serialization."""
+        llm_dict = {
+            "provider": self.llm.provider,
+            "model": self.llm.model
+        }
+        # Only include base_url if set (for local providers)
+        if self.llm.base_url:
+            llm_dict["base_url"] = self.llm.base_url
+
         return {
-            "llm": {
-                "provider": self.llm.provider,
-                "model": self.llm.model
-            },
+            "llm": llm_dict,
             "display": {
                 "symbols": self.display.symbols,
                 "format": self.display.format
@@ -178,7 +263,8 @@ class Config:
         return cls(
             llm=LLMConfig(
                 provider=llm_data.get("provider", DEFAULT_PROVIDER),
-                model=llm_data.get("model")
+                model=llm_data.get("model"),
+                base_url=llm_data.get("base_url")
             ),
             display=DisplayConfig(
                 symbols=display_data.get("symbols", "auto"),
@@ -279,6 +365,8 @@ class ConfigManager:
             config_data.setdefault("llm", {})["provider"] = os.environ["BABEL_LLM_PROVIDER"]
         if os.environ.get("BABEL_LLM_MODEL"):
             config_data.setdefault("llm", {})["model"] = os.environ["BABEL_LLM_MODEL"]
+        if os.environ.get("BABEL_LLM_BASE_URL"):
+            config_data.setdefault("llm", {})["base_url"] = os.environ["BABEL_LLM_BASE_URL"]
         
         self._config = Config.from_dict(config_data)
         return self._config
@@ -326,8 +414,10 @@ class ConfigManager:
                 config.llm.provider = value
             elif setting == "model":
                 config.llm.model = value
+            elif setting == "base_url":
+                config.llm.base_url = value
             else:
-                return f"Unknown LLM setting: {setting}. Valid: provider, model"
+                return f"Unknown LLM setting: {setting}. Valid: provider, model, base_url"
             # Validate LLM config
             error = config.llm.validate()
             if error:
@@ -381,6 +471,8 @@ class ConfigManager:
                 return config.llm.provider
             elif setting == "model":
                 return config.llm.effective_model
+            elif setting == "base_url":
+                return config.llm.effective_base_url
         elif section == "display":
             if setting == "symbols":
                 return config.display.symbols
@@ -409,19 +501,26 @@ class ConfigManager:
         config = self.load()
         symbols = get_symbols()
 
-        api_key_status = f"{symbols.check_pass} Set" if config.llm.is_available else f"{symbols.check_fail} Missing"
         lines = [
             "Configuration:",
             "",
             "LLM:",
-            f"  Provider: {config.llm.provider}",
+            f"  Provider: {config.llm.provider}" + (" (local)" if config.llm.is_local else ""),
             f"  Model: {config.llm.effective_model}",
-            f"  API Key: {api_key_status}",
         ]
-        
-        if not config.llm.is_available:
-            lines.append(f"  (Set {config.llm.api_key_env} environment variable)")
-        
+
+        if config.llm.is_local:
+            # Local provider: show base URL instead of API key
+            base_url = config.llm.effective_base_url or "not configured"
+            lines.append(f"  Base URL: {base_url}")
+            lines.append("  (Local LLM - no API key needed)")
+        else:
+            # Remote provider: show API key status
+            api_key_status = f"{symbols.check_pass} Set" if config.llm.api_key else f"{symbols.check_fail} Missing"
+            lines.append(f"  API Key: {api_key_status}")
+            if not config.llm.api_key:
+                lines.append(f"  (Set {config.llm.api_key_env} environment variable)")
+
         lines.extend([
             "",
             "Display:",
@@ -436,7 +535,7 @@ class ConfigManager:
             f"  User: {self.user_config_path}",
             f"  Project: {self.project_config_path}",
         ])
-        
+
         return "\n".join(lines)
 
 

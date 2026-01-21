@@ -14,7 +14,13 @@
 # Install
 git clone https://github.com/ktiyab/babel-tool.git
 cd babel-tool && ./install.sh
+
+# Configure LLM (choose one)
+export ANTHROPIC_API_KEY="sk-ant-..."   # Cloud: Claude (recommended)
+# OR use local LLM: export BABEL_LLM_PROVIDER=ollama
 ```
+
+> **Security:** `babel init` automatically adds `.env` to `.gitignore` to prevent credential leakage.
 
 **Then, only 4 commands to start:**
 
@@ -30,7 +36,7 @@ That's it. Your AI assistant handles the 30+ commands—you just review.
 
 > **Other AIs?** `babel prompt --install` auto-configures Claude Code and Cursor. For others, use `babel prompt > /path/to/ai/instructions.md` to write the prompt directly to the path expected by your AI.
 
-**Requirements:** Python 3.9+ • **More options:** [Installation & Configuration](#installation--configuration)
+**Requirements:** Python 3.9+ • **LLM options:** [Cloud API](#setting-up-api-keys) or [Local Ollama](#local-llm-ollama) • **Full config:** [Installation & Configuration](#installation--configuration)
 
 ---
 
@@ -2604,6 +2610,72 @@ export GOOGLE_API_KEY="..."
 
 Add to your shell profile (`~/.bashrc`, `~/.zshrc`) to persist across sessions.
 
+#### Using .env Files
+
+For project-specific configuration, use a `.env` file:
+
+```bash
+# Copy the template
+cp ~/.babel-tool/.env.example .env
+
+# Edit with your settings
+nano .env
+```
+
+**Example `.env` file:**
+```bash
+# Provider (claude, openai, gemini, ollama)
+BABEL_LLM_PROVIDER=claude
+
+# API Key
+ANTHROPIC_API_KEY=sk-ant-...
+
+# Model override (optional)
+BABEL_LLM_MODEL=claude-sonnet-4-20250514
+```
+
+> **Security:** `babel init` automatically adds `.env` to `.gitignore` to prevent credential leakage. Never commit `.env` files containing API keys.
+
+Babel auto-loads `.env` files from:
+1. Current directory (`./.env`)
+2. User config (`~/.babel/.env`)
+
+Install `python-dotenv` for automatic loading: `pip install babel-tool[dotenv]`
+
+#### Local LLM (Ollama)
+
+Run Babel entirely offline with a local LLM—no API keys, no data sent externally.
+
+**Setup:**
+```bash
+# 1. Install Ollama
+curl -fsSL https://ollama.com/install.sh | sh
+
+# 2. Pull a model
+ollama pull llama3.2
+
+# 3. Start Ollama
+ollama serve
+
+# 4. Configure Babel
+export BABEL_LLM_PROVIDER=ollama
+export BABEL_LLM_MODEL=llama3.2
+```
+
+**Or in `.env`:**
+```bash
+BABEL_LLM_PROVIDER=ollama
+BABEL_LLM_MODEL=llama3.2
+BABEL_LLM_BASE_URL=http://localhost:11434  # Optional, this is the default
+```
+
+**Compatible local LLM servers:**
+- [Ollama](https://ollama.com) (recommended)
+- [LM Studio](https://lmstudio.ai) — set `BABEL_LLM_BASE_URL=http://localhost:1234/v1`
+- [LocalAI](https://localai.io) — set `BABEL_LLM_BASE_URL=http://localhost:8080/v1`
+
+**Priority logic:** If both an API key and local LLM are configured, Babel uses the remote provider. This ensures users with API keys get cloud quality while allowing offline-only setups.
+
 #### Selecting a Provider
 
 ```bash
@@ -2676,8 +2748,8 @@ For CI/CD or temporary overrides:
 
 ```bash
 # Override provider for this session
-export INTENT_LLM_PROVIDER=openai
-export INTENT_LLM_MODEL=gpt-5-nano
+export BABEL_LLM_PROVIDER=openai
+export BABEL_LLM_MODEL=gpt-5-nano
 
 babel scan  # Uses OpenAI with gpt-5-nano
 ```
@@ -2729,6 +2801,8 @@ babel history
 babel capture "..."  # Falls back to pattern matching
 babel scan           # Requires LLM
 ```
+
+**Want LLM features offline?** Use [Local LLM (Ollama)](#local-llm-ollama) — full LLM capabilities without sending data externally.
 
 ### Display Options
 
@@ -2908,8 +2982,9 @@ With an API key, Babel's internal LLM summarizes and structures that history *be
 **The tradeoff:**
 - No API key = works offline, but context overload risk at scale
 - With API key = optimized context, scales to large projects (pennies per query)
+- With local LLM (Ollama) = full LLM features offline, no data sent externally
 
-**Recommendation:** Set up an API key early. Claude Sonnet is the default and offers a good balance of quality and cost.
+**Recommendation:** Set up an API key early (Claude Sonnet is the default). Or use [Ollama](#local-llm-ollama) for fully private, offline operation.
 
 ### How does my AI assistant know about Babel?
 

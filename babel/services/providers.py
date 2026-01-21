@@ -189,6 +189,113 @@ class GeminiProvider(LLMProvider):
         )
 
 
+class OllamaProvider(LLMProvider):
+    """
+    Ollama local LLM provider.
+
+    Uses OpenAI-compatible API at localhost:11434/v1/chat/completions.
+    No external package required - uses stdlib urllib.
+    """
+
+    def __init__(self, config: LLMConfig):
+        self.config = config
+        self._available: Optional[bool] = None  # Cached availability
+
+    @property
+    def base_url(self) -> str:
+        """Get base URL for Ollama API."""
+        return self.config.effective_base_url or "http://localhost:11434"
+
+    def _check_ollama_running(self) -> bool:
+        """Check if Ollama is running by querying the API."""
+        import urllib.request
+        import urllib.error
+
+        try:
+            # Try to reach Ollama's tags endpoint (lists models)
+            url = f"{self.base_url}/api/tags"
+            req = urllib.request.Request(url, method='GET')
+            with urllib.request.urlopen(req, timeout=5) as response:
+                return response.status == 200
+        except (urllib.error.URLError, urllib.error.HTTPError, OSError):
+            return False
+
+    @property
+    def is_available(self) -> bool:
+        """Check if Ollama is running and accessible."""
+        if self._available is None:
+            self._available = self._check_ollama_running()
+        return self._available
+
+    def complete(self, system: str, user: str, max_tokens: int = 2048) -> LLMResponse:
+        """
+        Get completion from Ollama using OpenAI-compatible API.
+
+        Uses urllib (stdlib) to avoid external dependencies.
+        """
+        import urllib.request
+        import urllib.error
+        import json
+
+        if not self.is_available:
+            raise RuntimeError(
+                f"Ollama not running at {self.base_url}. "
+                "Start with: ollama serve"
+            )
+
+        url = f"{self.base_url}/v1/chat/completions"
+
+        payload = {
+            "model": self.config.effective_model,
+            "messages": [
+                {"role": "system", "content": system},
+                {"role": "user", "content": user}
+            ],
+            "max_tokens": max_tokens,
+            "stream": False
+        }
+
+        data = json.dumps(payload).encode('utf-8')
+        headers = {
+            'Content-Type': 'application/json',
+        }
+
+        req = urllib.request.Request(url, data=data, headers=headers, method='POST')
+
+        try:
+            with urllib.request.urlopen(req, timeout=120) as response:
+                result = json.loads(response.read().decode('utf-8'))
+
+                # Extract response text
+                text = result.get('choices', [{}])[0].get('message', {}).get('content', '')
+
+                # Extract token usage (Ollama provides this in OpenAI format)
+                usage = result.get('usage', {})
+                input_tokens = usage.get('prompt_tokens', 0)
+                output_tokens = usage.get('completion_tokens', 0)
+
+                return LLMResponse(
+                    text=text,
+                    input_tokens=input_tokens,
+                    output_tokens=output_tokens
+                )
+
+        except urllib.error.HTTPError as e:
+            if e.code == 404:
+                raise RuntimeError(
+                    f"Model '{self.config.effective_model}' not found. "
+                    f"Pull with: ollama pull {self.config.effective_model}"
+                )
+            raise RuntimeError(f"Ollama API error: {e.code} {e.reason}")
+        except urllib.error.URLError as e:
+            raise RuntimeError(
+                f"Cannot connect to Ollama at {self.base_url}. "
+                "Ensure Ollama is running: ollama serve"
+            )
+        except json.JSONDecodeError as e:
+            raise RuntimeError(f"Invalid response from Ollama: {e}")
+
+
 class MockProvider(LLMProvider):
     """Mock provider for testing."""
     
@@ -211,28 +318,46 @@ class MockProvider(LLMProvider):
 def get_provider(config: Config) -> LLMProvider:
     """
     Get LLM provider based on configuration.
-    
+
+    Priority (remote API key takes precedence over local):
+      1. If remote provider configured AND API key set → use remote
+      2. If local provider (ollama) configured → use local
+      3. Otherwise → MockProvider with actionable error
+
     Args:
         config: Application configuration
-        
+
     Returns:
         Configured provider, or MockProvider if none available
     """
     llm = config.llm
-    
-    providers = {
+
+    # Remote providers (require API key)
+    remote_providers = {
         "claude": ClaudeProvider,
         "openai": OpenAIProvider,
         "gemini": GeminiProvider
     }
-    
-    provider_class = providers.get(llm.provider)
-    
-    if provider_class:
+
+    # Local providers (no API key needed)
+    local_providers = {
+        "ollama": OllamaProvider
+    }
+
+    # Priority 1: Remote provider with API key
+    if llm.provider in remote_providers:
+        provider_class = remote_providers[llm.provider]
         provider = provider_class(llm)
         if provider.is_available:
             return provider
-    
+
+    # Priority 2: Local provider (ollama)
+    if llm.provider in local_providers:
+        provider_class = local_providers[llm.provider]
+        provider = provider_class(llm)
+        if provider.is_available:
+            return provider
+
     # Fall back to mock if no provider available
     return MockProvider()
 
@@ -241,6 +366,21 @@ def get_provider_status(config: Config) -> str:
     """Get human-readable provider status."""
     llm = config.llm
 
+    # Handle local providers (no API key needed)
+    if llm.is_local:
+        provider = get_provider(config)
+
+        if isinstance(provider, MockProvider):
+            # Ollama not running
+            base_url = llm.effective_base_url or "http://localhost:11434"
+            return f"Ollama not running at {base_url}. Start with: ollama serve"
+
+        if isinstance(provider, OllamaProvider):
+            return f"Ollama: {llm.effective_model} (local)"
+
+        return f"{llm.provider.title()}: {llm.effective_model} (local)"
+
+    # Handle remote providers (require API key)
     if not llm.api_key:
         return f"LLM not configured (set {llm.api_key_env} environment variable)"
 
