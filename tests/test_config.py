@@ -191,7 +191,10 @@ class TestProviders:
             assert "env_key" in config
             assert "default_model" in config
             assert "models" in config
-            assert len(config["models"]) > 0
+            # Local providers (like ollama) have empty models list
+            # since models are locally installed and vary by user
+            if not config.get("is_local", False):
+                assert len(config["models"]) > 0
     
     def test_claude_config(self):
         """Claude provider is correctly configured."""
@@ -204,3 +207,9 @@ class TestProviders:
     def test_gemini_config(self):
         """Gemini provider is correctly configured."""
         assert PROVIDERS["gemini"]["env_key"] == "GOOGLE_API_KEY"
+
+    def test_ollama_config(self):
+        """Ollama provider is correctly configured as local."""
+        assert PROVIDERS["ollama"]["env_key"] is None
+        assert PROVIDERS["ollama"]["is_local"] is True
+        assert PROVIDERS["ollama"]["default_model"] == "llama3.2"
