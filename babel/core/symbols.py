@@ -25,7 +25,7 @@ import subprocess
 from dataclasses import dataclass, asdict, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import List, Dict, Optional, Set, Tuple, Any
+from typing import List, Dict, Optional, Set, Tuple, Any, Union
 
 from .events import DualEventStore, EventType, index_symbol
 
@@ -421,7 +421,7 @@ class CodeSymbolStore:
 
     def _extract_function(
         self,
-        node: ast.FunctionDef | ast.AsyncFunctionDef,
+        node: Union[ast.FunctionDef, ast.AsyncFunctionDef],
         module_name: str,
         file_path: str,
         git_hash: str,
