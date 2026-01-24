@@ -11,6 +11,7 @@ Contains the foundational data structures:
 - Domains: P3 expertise governance and domain mapping
 - Vocabulary: P2 semantic term learning and expansion
 - Resolver: Fuzzy ID resolution for artifact references
+- Symbols: Processor-backed code symbol index
 """
 
 from .scope import EventScope, get_default_scope, scope_display_marker, scope_from_string
@@ -40,6 +41,7 @@ from .domains import (
 )
 from .vocabulary import Vocabulary, expand_query, merge_vocabularies, DEFAULT_CLUSTERS, COMMON_PATTERNS
 from .resolver import ResolveStatus, ResolveResult, IDResolver, format_resolve_prompt, resolve_with_prompt
+from .symbols import Symbol, CodeSymbolStore
 
 __all__ = [
     # Scope
@@ -74,4 +76,6 @@ __all__ = [
     "Vocabulary", "expand_query", "merge_vocabularies", "DEFAULT_CLUSTERS", "COMMON_PATTERNS",
     # Resolver
     "ResolveStatus", "ResolveResult", "IDResolver", "format_resolve_prompt", "resolve_with_prompt",
+    # Symbols
+    "Symbol", "CodeSymbolStore",
 ]

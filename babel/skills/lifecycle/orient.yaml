@@ -1,0 +1,212 @@
+name: orient
+category: lifecycle
+description: Initialize session with project context. MANDATORY at session start. Understand purpose, tensions, and open questions before ANY work. "A soldier doesn't enter a mission without briefing." Priority CRITICAL - skip means you work blind.
+
+trigger: Session starts (MANDATORY - before user asks anything), user asks "what's the status" or "where are we" or "brief me", after long pause in conversation, when context feels stale
+
+commands:
+  # Core trio (MANDATORY at session start)
+  - babel status
+  - babel tensions
+  - babel questions
+  # Combined execution
+  - 'babel status && babel tensions && babel questions'
+  # Extended options
+  - babel status --full
+  - babel status --git
+  - babel tensions --full
+
+principles:
+  - P2 (Purpose Primacy) - Must know purpose before acting on it
+  - HC2 (Human Authority) - Surfacing context for human decisions
+
+uses_context:
+  - Babel graph database (.babel/)
+  - Project configuration
+
+produces:
+  - Project purpose and health status
+  - Init memos (foundational instructions)
+  - Open tensions requiring resolution (sorted by severity)
+  - Unresolved questions
+  - Awareness of pending reviews
+
+composable_with:
+  - recall (AFTER orient - query specific topics)
+  - continue (orient is Phase 1 of continuation)
+  - start-new (orient is Phase 1 of new task)
+
+always_load: true
+load_on_demand: false
+user_invocable: true
+
+examples:
+  - |
+    ## FLOW 3: ORIENT — Understand Project State (MANDATORY AT SESSION START)
+
+    **Priority:** CRITICAL (Non-Negotiable)
+    **Consequence of Skip:** You work blind, contradict project purpose
+
+    **The Briefing Metaphor:**
+    A soldier doesn't enter a mission without briefing.
+    You don't start coding without orientation.
+
+  - |
+    ### The Core Trio (MANDATORY)
+
+    Run these IMMEDIATELY when session begins:
+
+    ```bash
+    babel status      # Purpose + health + init memos
+    babel tensions    # Contested decisions
+    babel questions   # Acknowledged unknowns
+    ```
+
+    Or combined:
+    ```bash
+    babel status && babel tensions && babel questions
+    ```
+
+  - |
+    ### What You Must Know Before ANY Work
+
+    | Question | Source | Why It Matters |
+    |----------|--------|----------------|
+    | What is this project trying to achieve? | `babel status` | Every action must serve purpose |
+    | What decisions are contested? | `babel tensions` | Avoid making contested decisions |
+    | What questions are unresolved? | `babel questions` | Don't assume answers that don't exist |
+    | What rules must I follow? | Init memos in status | Foundational instructions apply always |
+
+  - |
+    ### What Status Contains
+
+    - Project purpose (single sentence)
+    - Health metrics (confusion level: ◔ high, ◐ moderate, ● aligned)
+    - Artifact counts by type
+    - Init memos (foundational instructions - ALWAYS displayed)
+    - Pending reviews count
+    - Git-babel sync status (if --git)
+
+  - |
+    ### Init Memos (Foundational Instructions)
+
+    Init memos surface at the TOP of `babel status` output.
+    These are rules the user set that you MUST follow.
+
+    **Examples:**
+    - "Never bypass babel to use database directly"
+    - "Always use python3 not python"
+    - "Tests must pass before any commit"
+
+    **Why they matter:**
+    - Apply to EVERY session, not just specific contexts
+    - Set by user via `babel memo "..." --init`
+    - Cannot be ignored or deprioritized
+
+  - |
+    ### Tension Severity Levels
+
+    From `babel tensions` output:
+
+    | Symbol | Severity | Meaning | Your Response |
+    |--------|----------|---------|---------------|
+    | 🔴 | Critical | Hard constraint violated | Accelerate resolution cycle |
+    | 🟡 | Warning | Potential conflict | Maintain current pace |
+    | 🟢 | Info | Minor tension | Continue normally |
+
+    **Critical tensions require immediate attention before proceeding.**
+
+  - |
+    ### Health Symbols
+
+    From `babel status` output:
+
+    | Symbol | Level | Meaning | Action |
+    |--------|-------|---------|--------|
+    | ◔ | High confusion | Many tensions, low alignment | Slow down, resolve tensions |
+    | ◐ | Moderate | Some open items | Address before major changes |
+    | ● | Aligned | Healthy state | Safe to proceed |
+
+  - |
+    ### Extended Commands
+
+    ```bash
+    # Detailed health analysis
+    babel status --full
+
+    # Git-babel sync health (shows unlinked decisions/commits)
+    babel status --git
+
+    # Full tension details with severity context
+    babel tensions --full
+    ```
+
+  - |
+    ### In START NEW Mode
+
+    Orient is Phase 1 of starting a new task:
+
+    ```
+    1. orient (this) → babel status && babel tensions && babel questions
+    2. recall       → babel why "topic"
+    3. remember     → babel capture "..." --batch
+    4. spec         → babel capture --spec <id> "..." --batch
+    5. implement    → write code
+    6. verify       → babel coherence
+    ```
+
+  - |
+    ### In CONTINUE Mode
+
+    Orient is Phase 1 of continuing ongoing work:
+
+    ```
+    1. orient (this) → babel status && babel tensions && babel questions
+    2. work state   → babel review --list && babel history | grep TASK
+    3. locate next  → babel list constraints | grep depends
+    4. context      → babel why "TASK X.Y topic"
+    5. resume       → continue implementation
+    ```
+
+  - |
+    ### AI Behavior (CRITICAL)
+
+    **WRONG:**
+    ```
+    User: "Let's add caching"
+    AI: [immediately starts discussing caching]
+    # ← No orientation, working blind
+    ```
+
+    **RIGHT:**
+    ```
+    [Session starts]
+    AI: [runs babel status && babel tensions && babel questions]
+    AI: "Project: [purpose]. No critical tensions. 2 open questions.
+         Ready to proceed. You mentioned caching - let me check context first..."
+    AI: [runs babel why "caching"]
+    # ← Oriented, then informed action
+    ```
+
+  - |
+    ### Consequence of Skipping Orient
+
+    | Skip | Result |
+    |------|--------|
+    | Skip `babel status` | Don't know project purpose → contradict it |
+    | Miss init memos | Violate foundational rules user set |
+    | Skip `babel tensions` | Make decisions that are contested |
+    | Skip `babel questions` | Assume answers that don't exist |
+
+    **Combined result: You work blind.**
+
+  - |
+    ### The Rule
+
+    ```
+    BEFORE anything else:
+      babel status && babel tensions && babel questions
+
+    This is your briefing. Every session. No exceptions.
+    ```
+

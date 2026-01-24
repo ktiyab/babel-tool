@@ -1,0 +1,200 @@
+name: VERBATIM
+description: Never invent what Babel didn't say. Quote verbatim, state emptiness, distinguish sources clearly. Prevents hallucination of project context. If Babel didn't produce the text, don't attribute it to Babel.
+rule: When reporting Babel output, quote exactly. Never paraphrase or fill gaps with assumptions. State emptiness explicitly. Distinguish Babel quotes from your interpretation.
+
+applies_to:
+  - All output from babel why queries
+  - All artifact summaries
+  - All decision references
+  - All Babel command results
+
+user_invocable: false
+
+examples:
+  - |
+    ## VERBATIM PROTOCOL — Never Invent What Babel Didn't Say
+
+    **The Rule:**
+    If Babel didn't produce the text, don't attribute it to Babel.
+
+    | Action | Result |
+    |--------|--------|
+    | Quote verbatim | Accurate project context |
+    | State emptiness | User knows gaps exist |
+    | Distinguish sources | Clear what's Babel vs interpretation |
+    | Paraphrase/fill gaps | **Hallucination of project context** |
+
+  - |
+    ### Why This Matters
+
+    Your training data knows NOTHING about this specific project.
+
+    | Source | Authority | Trust Level |
+    |--------|-----------|-------------|
+    | Babel output | Project-specific decisions | **Authoritative** |
+    | Your training | General patterns | Not applicable here |
+    | Your inference | Derived reasoning | Must be labeled |
+
+    **Babel is truth. Your guesses are not.**
+
+  - |
+    ### Source Attribution Format
+
+    **Always distinguish sources explicitly:**
+
+    ```
+    FROM BABEL (verbatim):
+      "[a1b2c3d4] Using SQLite for offline storage because users need offline access"
+
+    MY INTERPRETATION (clearly labeled):
+      "This suggests caching should also be local-first"
+    ```
+
+    **The separation is mandatory.** Never blend these.
+
+  - |
+    ### When Babel Returns Results
+
+    | DO | DON'T |
+    |----|-------|
+    | `Babel shows: "[a1b2c3d4] Using SQLite because..."` | "Babel suggests SQLite is preferred" |
+    | Quote the exact text | Paraphrase or summarize |
+    | Include the ID | Drop the ID |
+    | Preserve exact wording | Rephrase for "clarity" |
+
+    **Exact quote preserves intent. Paraphrase loses it.**
+
+  - |
+    ### When Babel Returns Nothing
+
+    **WRONG:**
+    ```
+    "There's no specific decision, but typically projects use..."
+    "Based on common patterns, this probably..."
+    ```
+
+    **Problems:**
+    - Fills gap with training data
+    - User thinks this is project context
+    - Hallucination of project-specific knowledge
+
+    **RIGHT:**
+    ```
+    "Babel has no captured decisions about caching.
+     This is a gap — should we capture a decision now?"
+    ```
+
+    **Benefits:**
+    - User knows the gap exists
+    - Opportunity to capture missing context
+    - No false confidence
+
+  - |
+    ### When Babel Returns Partial Info
+
+    **WRONG:**
+    ```
+    "Babel mentions SQLite, which implies the team values simplicity..."
+    ```
+
+    **Problems:**
+    - Inference attributed to Babel
+    - "implies" is YOUR interpretation, not Babel's statement
+    - User can't distinguish fact from inference
+
+    **RIGHT:**
+    ```
+    "Babel shows: '[a1b2c3d4] Using SQLite for offline storage'
+     No other context captured. Want me to query related topics?"
+    ```
+
+    **Benefits:**
+    - Clear what Babel said
+    - Clear what's NOT captured
+    - User can decide to explore further
+
+  - |
+    ### Interpretation Labeling
+
+    When you DO need to interpret, label it clearly:
+
+    ```
+    FROM BABEL:
+      "[a1b2c3d4] Using SQLite for offline storage because users need offline access"
+
+    MY INTERPRETATION:
+      Based on this, the team likely prioritizes offline-first architecture.
+      However, this is inference — Babel doesn't explicitly state this.
+
+    SUGGESTED QUERY:
+      Want me to check `babel why "offline architecture"` for more context?
+    ```
+
+    **Three sections: BABEL (fact), INTERPRETATION (labeled), NEXT STEP (action)**
+
+  - |
+    ### Common Violations
+
+    | Violation | Example | Fix |
+    |-----------|---------|-----|
+    | Paraphrasing | "Babel suggests SQLite is preferred" | Quote exact text |
+    | Gap filling | "Typically projects use..." | "Babel has no info on this" |
+    | Implicit inference | "Babel mentions X, which implies Y" | Separate BABEL from INTERPRETATION |
+    | Dropping IDs | "There's a decision about SQLite" | Include `[a1b2c3d4]` |
+    | Summarizing | "Babel says to use SQLite" | Quote the full reasoning |
+
+  - |
+    ### Connection to RECALL Flow
+
+    VERBATIM protocol applies whenever you use:
+    - `babel why "topic"` — Quote results verbatim
+    - `babel list` — Show exact IDs and summaries
+    - `babel history` — Report exact evolution
+
+    **Requires:** knowledge/recall skill for `babel why` queries
+
+    ```
+    RECALL FLOW:
+      babel why "topic" → [results] → VERBATIM output → [interpretation if needed]
+    ```
+
+  - |
+    ### After Context Compression
+
+    When session context compresses, you may forget this protocol.
+
+    **Recovery:**
+    1. Before reporting ANY Babel output, pause
+    2. Ask: "Am I quoting exactly, or paraphrasing?"
+    3. If paraphrasing: reformat to verbatim
+    4. If no results: state emptiness explicitly
+
+    **Default behavior:** Quote, don't interpret.
+
+  - |
+    ### DO vs DON'T Summary
+
+    | DO | DON'T |
+    |----|-------|
+    | `Babel shows: "[id] exact text"` | "Babel suggests..." |
+    | "Babel has no information on X" | "Typically projects..." |
+    | "FROM BABEL: [text]" | Blend Babel + interpretation |
+    | "MY INTERPRETATION: [analysis]" | Attribute inference to Babel |
+    | Include full ID | Drop actionable reference |
+    | Quote complete reasoning | Summarize away the WHY |
+
+  - |
+    ### The Rule (Summary)
+
+    ```
+    ALWAYS: Quote verbatim → State emptiness → Label interpretation
+    NEVER:  Paraphrase → Fill gaps → Blend sources
+
+    Three questions before ANY Babel output:
+    1. Am I quoting EXACTLY what Babel returned?
+    2. If nothing returned, am I stating that explicitly?
+    3. Is my interpretation CLEARLY LABELED as mine?
+    ```
+
+    **If Babel didn't produce the text, don't attribute it to Babel.**
+

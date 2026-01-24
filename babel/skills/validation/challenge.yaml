@@ -1,0 +1,239 @@
+name: challenge
+category: validation
+description: Disagree with prior decision constructively. Frame disagreement as testable hypothesis. Build evidence before resolving. Disagreement is information, not conflict.
+trigger: Prior decision seems wrong, have evidence against existing artifact, user says "I disagree" or "this doesn't make sense", tension detected (auto or manual)
+
+commands:
+  # Create challenge
+  - 'babel challenge <id> "reason for disagreement"'
+  # Build evidence (multiple pieces strengthen case)
+  - 'babel evidence <challenge_id> "supporting finding"'
+  - 'babel evidence <challenge_id> "additional observation"'
+  # Resolve (typically USER's action)
+  - babel resolve <id> --outcome confirmed|revised|synthesized|dissolved|uncertain
+  # AI-safe resolve (provide all params)
+  - 'babel resolve <id> --outcome confirmed --force --resolution "text"'
+  - 'babel resolve <id> --outcome revised --force --resolution "text"'
+
+principles:
+  - P4 (Disagreement as Hypothesis) - Changes framed as testable claims
+  - P5 (Dual-Test Truth) - Consensus AND evidence required
+
+uses_context:
+  - Decision being challenged
+  - Evidence supporting challenge
+  - Related artifacts that may be affected
+
+produces:
+  - Challenge record with reason
+  - Evidence chain (multiple pieces)
+  - Resolution outcome with documentation
+
+composable_with:
+  - recall (check context before challenging)
+  - revise (when outcome is revised)
+  - tension (challenge creates/resolves tensions)
+  - uncertain (when outcome is uncertain)
+
+always_load: false
+load_on_demand: true
+user_invocable: true
+
+examples:
+  - |
+    ## FLOW 4: DISAGREE — Challenge Prior Decisions
+
+    **Philosophy:**
+    Disagreement is information, not conflict.
+
+    | Approach | Result |
+    |----------|--------|
+    | Frame as testable hypothesis | Constructive exploration |
+    | Frame as accusation | Defensive reaction |
+    | Build evidence first | Informed resolution |
+    | Resolve without evidence | Arbitrary decision |
+
+  - |
+    ### Trigger Patterns
+
+    When to use the challenge skill:
+
+    | Pattern | Example | Response |
+    |---------|---------|----------|
+    | Prior decision wrong | "This SQLite decision is causing scale issues" | `babel challenge <id> "reason"` |
+    | Evidence against artifact | Test results contradict assumption | `babel challenge` + `babel evidence` |
+    | User disagrees | "I disagree", "this doesn't make sense" | Create challenge |
+    | Tension detected | `babel coherence` finds conflict | Challenge to resolve |
+
+  - |
+    ### Command Reference
+
+    ```bash
+    # Step 1: Create challenge with clear reason
+    babel challenge <id> "why it seems wrong"
+
+    # Step 2: Build evidence (multiple pieces)
+    babel evidence <challenge_id> "observation 1"
+    babel evidence <challenge_id> "observation 2"
+    babel evidence <challenge_id> "additional finding"
+
+    # Step 3: User decides resolution
+    babel resolve <id> --outcome confirmed|revised|synthesized|dissolved|uncertain
+    ```
+
+  - |
+    ### AI-Safe Resolution
+
+    When AI needs to resolve (provide ALL parameters):
+
+    ```bash
+    # Confirmed — original was correct
+    babel resolve <id> --outcome confirmed --force --resolution "Validated by testing"
+
+    # Revised — new artifact replaces old
+    babel resolve <id> --outcome revised --force --resolution "Superseded by [new_id]"
+
+    # Synthesized — merged understanding
+    babel resolve <id> --outcome synthesized --force --resolution "Combined both approaches"
+
+    # Uncertain — need more data
+    babel resolve <id> --outcome uncertain --force --resolution "Need production metrics"
+
+    # Dissolved — no longer relevant
+    babel resolve <id> --outcome dissolved --force --resolution "Context changed, moot"
+    ```
+
+  - |
+    ### Outcomes Explained
+
+    | Outcome | Meaning | When to Use |
+    |---------|---------|-------------|
+    | `confirmed` | Original was correct | Challenge disproven by evidence |
+    | `revised` | Original superseded | New artifact replaces old |
+    | `synthesized` | Both partially right | Merged into new understanding |
+    | `dissolved` | No longer relevant | Context changed, question is moot |
+    | `uncertain` | Can't decide yet | Hold ambiguity (P6), need more data |
+
+    **Note:** `resolve` is typically USER's action. Build evidence before resolving.
+
+  - |
+    ### Complete Workflow Example
+
+    ```bash
+    # Scenario: SQLite decision causing scale issues
+
+    # Step 1: Challenge with reason
+    babel challenge a1b2c3d4 "SQLite can't handle concurrent writes from multiple users"
+
+    # Step 2: Build evidence
+    babel evidence f78203a2 "Load test shows write failures above 10 concurrent users"
+    babel evidence f78203a2 "Production logs show lock contention errors"
+    babel evidence f78203a2 "User reports confirm data loss during peak usage"
+
+    # Step 3: Capture replacement (before resolving)
+    babel capture "Use PostgreSQL for multi-user concurrent access" --batch
+
+    # Step 4: User reviews and accepts new decision → [new_id]
+
+    # Step 5: Resolve with supersession
+    babel resolve f78203a2 --outcome revised --force --resolution "Superseded by [new_id]"
+    ```
+
+  - |
+    ### Connection to Tension Flow
+
+    Tensions can be created via:
+    - **Auto-detection:** `babel coherence` finds conflicts
+    - **Manual creation:** `babel challenge` creates tension
+
+    Both use the same resolution workflow:
+    ```
+    [detect/create] → evidence(×N) → [user decides] → resolve
+    ```
+
+    See `validation/tension` skill for severity grading (🔴🟡🟢).
+
+  - |
+    ### Connection to Revise Flow
+
+    When `--outcome revised`:
+
+    1. Use REVISE skill for full workflow
+    2. Includes: capture replacement, link evolution
+    3. Maintains P8 (Evolution Traceable) chain
+
+    ```bash
+    # After resolve --outcome revised
+    babel link <new_artifact_id> <old_artifact_id>  # evolves_from link
+    ```
+
+    **Don't skip the link** — it maintains traceability.
+
+  - |
+    ### Evidence Building
+
+    Multiple evidence pieces strengthen the case:
+
+    | Pieces | Strength | Example |
+    |--------|----------|---------|
+    | 1 | Weak | "I think it's wrong" |
+    | 2-3 | Moderate | Tests + logs |
+    | 4+ | Strong | Tests + logs + user reports + metrics |
+
+    **Rule:** Build evidence BEFORE resolving. Don't resolve on opinion alone.
+
+  - |
+    ### Workflow Pattern
+
+    ```
+    challenge → evidence(×N) → [user decides] → resolve
+
+    Key points:
+    - Build evidence BEFORE resolving
+    - resolve is typically USER's action
+    - Multiple evidence pieces strengthen case
+    - If outcome is "revised", use full revise skill workflow
+    ```
+
+  - |
+    ### Common Mistakes
+
+    | Mistake | Why It's Wrong | Fix |
+    |---------|----------------|-----|
+    | Resolve without evidence | Arbitrary decision | Build evidence first |
+    | Skip challenge, just capture new | No traceability (P8 violated) | Challenge → evidence → resolve |
+    | AI resolves without --force | Interactive prompt fails | Use `--force --resolution "text"` |
+    | Outcome revised, skip link | Evolution chain broken | Use revise flow, create link |
+    | Frame as accusation | Defensive reaction | Frame as testable hypothesis |
+
+  - |
+    ### Consequence of Skipping
+
+    | Skip | Result |
+    |------|--------|
+    | Skip challenge | Disagreement unrecorded |
+    | Skip evidence | No evidence trail, resolution arbitrary |
+    | Skip resolution | Tension lingers, drift compounds |
+    | Skip link after revised | Evolution chain broken (P8) |
+
+    **Rule:** Challenge flow creates auditability. Skipping loses it.
+
+  - |
+    ### The Rule (Summary)
+
+    ```
+    WORKFLOW: challenge → evidence(×N) → [user decides] → resolve
+
+    KEY BEHAVIORS:
+    - Disagreement is information, not conflict
+    - Frame as testable hypothesis (P4)
+    - Build evidence BEFORE resolving
+    - resolve is typically USER's action
+    - If outcome is "revised", use full revise skill
+
+    AI-SAFE COMMANDS:
+    - babel resolve <id> --outcome X --force --resolution "text"
+    ```
+
+    **Challenge constructively. Build evidence. Let human decide.**
+

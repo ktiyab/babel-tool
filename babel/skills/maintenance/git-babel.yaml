@@ -1,0 +1,248 @@
+name: git-babel
+category: maintenance
+description: Bridge intent to code. Connect decisions to commits, find gaps, understand why commits exist. Enables "babel why --commit" queries and tracks implementation status. P7 requires decisions connect to implementation.
+
+trigger: After implementing a decision, before refactoring code (understand why it exists), reviewing implementation status, after several commits (find gaps), project health check
+
+commands:
+  # Linking
+  - babel link <id> --to-commit <sha>
+  - babel link <id> --to-commit HEAD
+  - babel link --commits
+  # Querying
+  - babel why --commit <sha>
+  # Gap analysis
+  - babel gaps
+  - babel gaps --decisions
+  - babel gaps --commits
+  # AI suggestions
+  - babel suggest-links
+  - babel suggest-links --from-recent N
+  # Health check
+  - babel status --git
+
+principles:
+  - P7 (Reasoning Travels) - Decisions must connect to implementation
+  - P8 (Evolution Traceable) - Code changes need documented intent
+
+uses_context:
+  - Decision ID to link
+  - Commit SHA to link or query
+  - Recent commit history (for suggest-links)
+  - Existing decision-commit links
+
+produces:
+  - Decision-commit links (bidirectional)
+  - Intent behind commits (via babel why --commit)
+  - Implementation gaps (decisions without commits, commits without decisions)
+  - AI-suggested links (via suggest-links)
+  - Sync health metrics (via status --git)
+
+composable_with:
+  - remember (capture decision → implement → link to commit)
+  - recall (babel why --commit extends recall to git history)
+  - start-new (Phase 5 uses git-babel linking)
+  - verify (after verify, link implements coherence)
+  - maintain (git health is part of maintenance)
+
+always_load: false
+load_on_demand: true
+user_invocable: true
+
+examples:
+  - |
+    ## FLOW 14: GIT-BABEL BRIDGE — Connect Decisions to Commits (P7, P8)
+
+    Bridge intent (captured decisions) to state (git commits).
+
+    **Why This Matters:**
+    - P7 (Reasoning Travels) - Decisions must connect to implementation
+    - P8 (Evolution Traceable) - Code changes need documented intent
+
+  - |
+    ### Command Reference
+
+    ```bash
+    # LINKING
+    babel link <id> --to-commit <sha>      # Connect decision to specific commit
+    babel link <id> --to-commit HEAD       # Connect to most recent commit
+    babel link --commits                   # List all decision-commit links
+
+    # QUERYING
+    babel why --commit <sha>               # Why does this commit exist?
+
+    # GAP ANALYSIS
+    babel gaps                             # Show all gaps
+    babel gaps --decisions                 # Only unlinked decisions (intent without implementation)
+    babel gaps --commits                   # Only unlinked commits (implementation without intent)
+
+    # AI SUGGESTIONS
+    babel suggest-links                    # AI suggests links for all unlinked
+    babel suggest-links --from-recent N    # AI analyzes last N commits
+
+    # HEALTH CHECK
+    babel status --git                     # Git-babel sync health
+    ```
+
+  - |
+    ### Gaps Explained
+
+    | Gap Type | Meaning | Risk |
+    |----------|---------|------|
+    | Decisions without commits | Unimplemented intent — decision captured but not coded | Work forgotten |
+    | Commits without decisions | Undocumented changes — code exists but why is unknown | Refactoring risk |
+
+    ```bash
+    babel gaps --decisions  # Shows intent without implementation
+    babel gaps --commits    # Shows implementation without intent
+    ```
+
+  - |
+    ### Health Check Output
+
+    ```bash
+    babel status --git
+    # → Decision-commit links: 23
+    # → ⚠ Unlinked decisions: 5
+    # → ⚠ Unlinked commits (last 20): 3
+    # → ➜ Run: babel gaps (see all gaps)
+    # → ➜ Run: babel suggest-links (AI suggestions)
+    ```
+
+  - |
+    ### AI Suggestions
+
+    ```bash
+    babel suggest-links
+    # AI analyzes commit messages and diffs
+    # Compares against captured decisions
+    # Suggests matches based on semantic similarity
+
+    babel suggest-links --from-recent 10
+    # Focuses on last 10 commits only
+    # More targeted, faster
+    ```
+
+  - |
+    ### When to Use
+
+    | Trigger | Command | Purpose |
+    |---------|---------|---------|
+    | After implementing decision | `babel link <id> --to-commit HEAD` | Connect intent to code |
+    | Before refactoring code | `babel why --commit <sha>` | Understand why code exists |
+    | List all bridged artifacts | `babel link --commits` | See all connections |
+    | Get AI link suggestions | `babel suggest-links` | Find missing links |
+    | Analyze recent commits | `babel suggest-links --from-recent N` | Focus on recent work |
+    | Show implementation gaps | `babel gaps` | Find all gaps |
+    | Only unlinked decisions | `babel gaps --decisions` | Intent without implementation |
+    | Only unlinked commits | `babel gaps --commits` | Implementation without intent |
+    | Project health check | `babel status --git` | Sync status overview |
+
+  - |
+    ### Complete Workflow
+
+    ```bash
+    # Step 1: Make a decision
+    babel capture "Use Redis for caching because of rate limits" --batch
+    # User accepts → [abc123]
+
+    # Step 2: Add specification
+    babel capture --spec abc123 "OBJECTIVE: Add caching layer
+    ADD: redis_client.py, cache_middleware.py
+    MODIFY: api_handler.py
+    REMOVE: None
+    PRESERVE: Rate limit logic
+    RELATED: api_config.py
+    TEST: Cache hit/miss, TTL expiration" --batch
+
+    # Step 3: Implement the decision
+    # ... write code, make commit ...
+    git commit -m "Add Redis caching layer"
+
+    # Step 4: Link decision to commit
+    babel link abc123 --to-commit HEAD
+
+    # Step 5: Later, query why a commit exists
+    babel why --commit abc123def
+    # → Shows: "Use Redis for caching because of rate limits"
+
+    # Step 6: Find gaps
+    babel gaps
+    # → Decisions without commits (unimplemented intent)
+    # → Commits without decisions (undocumented changes)
+
+    # Step 7: Get AI suggestions
+    babel suggest-links --from-recent 5
+    # → AI analyzes commits, suggests matching decisions
+    ```
+
+  - |
+    ### Command Lifecycle
+
+    ```
+    [IMPLEMENT] → link <id> --to-commit <sha> → [intent connected to code]
+
+    gaps → suggest-links → link --to-commit (close gaps)
+
+    why --commit <sha> → [understand why code exists before changing]
+
+    status --git → [health check: unlinked decisions/commits]
+    ```
+
+  - |
+    ### Used In Flows
+
+    | Flow | How Git-Babel Is Used |
+    |------|----------------------|
+    | start-new Phase 5 | `babel link <id> --to-commit HEAD` after implementation |
+    | continue | Check `babel status --git` before resuming |
+    | maintain | `babel status --git` as part of health check |
+    | before refactoring | `babel why --commit <sha>` to understand intent |
+
+  - |
+    ### Why This Matters
+
+    **WITHOUT git-babel:**
+    - Decisions exist but no one knows which code implements them
+    - Code exists but no one knows why it was written
+    - "Why does this commit exist?" → No answer
+    - Refactoring breaks things because intent was invisible
+
+    **WITH git-babel:**
+    - `babel why --commit <sha>` → "This implements [decision] because [reason]"
+    - Refactoring informed by original intent
+    - Gaps visible → close them proactively
+    - Implementation status tracked
+
+  - |
+    ### Before Refactoring (CRITICAL)
+
+    ```bash
+    # Before changing existing code, understand WHY it exists
+    babel why --commit <sha>
+
+    # Output:
+    # This commit implements:
+    #   [abc123] Use Redis for caching because of rate limits
+    #
+    # Related decisions:
+    #   [def456] Constraint: Max memory 512MB
+    #   [ghi789] Requirement: Sub-100ms response
+
+    # Now you can refactor with intent awareness
+    ```
+
+    **Refactoring without understanding intent risks breaking things.**
+
+  - |
+    ### Consequence of Skipping
+
+    | Skip | Result |
+    |------|--------|
+    | Skip linking after implement | Decisions disconnected from code |
+    | Skip `why --commit` before refactor | Risk breaking intended behavior |
+    | Skip `gaps` review | Unimplemented decisions forgotten |
+    | Skip `status --git` health check | Sync problems go unnoticed |
+
+    **Rule:** Every decision should link to its implementation.
+

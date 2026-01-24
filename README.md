@@ -25,16 +25,16 @@ export ANTHROPIC_API_KEY="sk-ant-..."   # Cloud: Claude (recommended)
 **Then, only 4 commands to start:**
 
 ```bash
-babel prompt --install              # Once: teach your AI
+babel prompt --install              # Once: teach your AI about Babel
+babel skill export                  # Once: install AI skills (auto-detects platform)
 babel init "Detailed information about your project purpose" \
- --need "Detailed information on the need/friction that led to the project" # Once: to initialized your project
-babel status                        # Periodically: See project purpose and key decisions
+ --need "Detailed information on the need/friction that led to the project" # Once: initialize your project
 babel review                        # Periodically: validate AI proposals
 ```
 
-That's it. Your AI assistant handles the 30+ commands—you just review.
+That's it. Your AI assistant handles the 35+ commands—you just review.
 
-> **Other AIs?** `babel prompt --install` auto-configures Claude Code and Cursor. For others, use `babel prompt > /path/to/ai/instructions.md` to write the prompt directly to the path expected by your AI.
+> **Other AIs?** `babel prompt --install` and `babel skill export` auto-configure Claude Code and Cursor. For others, use `babel prompt > /path/to/ai/instructions.md` and `babel skill export --target generic` to export to a monolithic reference file.
 
 **Requirements:** Python 3.9+ • **LLM options:** [Cloud API](#setting-up-api-keys) or [Local Ollama](#local-llm-ollama) • **Full config:** [Installation & Configuration](#installation--configuration)
 
@@ -443,8 +443,14 @@ The commands exist so the AI can handle any situation at scale and speed. You do
 | Resolve coherence issues | `babel coherence --resolve` | Interactive AI-guided resolution |
 | Resolve issues (AI mode) | `babel coherence --resolve --batch` | Non-interactive for AI operators |
 | Review pending proposals | `babel review` | See AI-extracted insights for approval |
+| List pending proposals | `babel review --list` | List without prompting (AI-safe) |
 | Accept all proposals | `babel review --accept-all` | Batch accept (AI-safe) |
 | Accept specific proposal | `babel review --accept <id>` | Accept one by ID |
+| Reject specific proposal | `babel review --reject <id>` | Reject with default reason (AI-safe) |
+| Reject with custom reason | `babel review --reject <id> --reason "..."` | Reject with explanation (P8) |
+| List rejected proposals | `babel review --rejected` | Learn from rejections (P8) |
+| Synthesize proposals | `babel review --synthesize` | AI clusters into themes |
+| Accept by theme | `babel review --accept-theme <name>` | Accept all in theme |
 | Generate project map | `babel map --refresh` | Create structure map for LLMs |
 | Update project map | `babel map --update` | Incremental update (changed files) |
 | Process offline queue | `babel process-queue` | Process queued extractions |
@@ -452,6 +458,13 @@ The commands exist so the AI can handle any situation at scale and speed. You do
 | Set up AI assistant | `babel prompt --install` | Install system prompt to IDE location |
 | Check prompt status | `babel prompt --status` | See if prompt is installed/outdated |
 | After upgrading babel | `babel prompt --install --force` | Update prompt with new features |
+| Export skills to platform | `babel skill export` | Auto-detect and export to platform |
+| Export to specific target | `babel skill export --target <X>` | claude-code, cursor, codex, generic |
+| Export to all platforms | `babel skill export --all` | Export to all active platforms |
+| Re-sync skills | `babel skill sync` | Re-export to previously exported platforms |
+| List available skills | `babel skill list` | Show all skills by category |
+| List skills by category | `babel skill list <category>` | lifecycle, knowledge, validation, etc. |
+| Check skill status | `babel skill` | Show skill export status across platforms |
 
 **Rule of thumb:** If you're explaining something verbally, capture it in Babel. Future you (and teammates) will thank you.
 
@@ -2390,6 +2403,76 @@ babel capture-commit --async
 
 ---
 
+### `babel skill` — Export Skills to AI Platforms
+
+**What:** Export Babel skills to platform-specific formats for AI coding assistants.
+
+**Why:** AI assistants need structured skill definitions to provide consistent, Babel-aware workflows. Skills encode best practices as invocable commands.
+
+```bash
+# Show skill export status
+babel skill
+
+# Export skills (auto-detect platform)
+babel skill export
+
+# Export to specific platform
+babel skill export --target claude-code
+babel skill export --target cursor
+babel skill export --target codex
+babel skill export --target generic    # Monolithic fallback
+
+# Export to all active platforms
+babel skill export --all
+
+# Force overwrite existing files
+babel skill export --target claude-code --force
+
+# Re-export to previously exported platforms
+babel skill sync
+
+# List available skills
+babel skill list
+
+# List skills by category
+babel skill list lifecycle
+babel skill list knowledge
+babel skill list validation
+babel skill list maintenance
+babel skill list preference
+babel skill list analyze
+```
+
+**Options:**
+- `export` — Export skills to platform (auto-detect if no target)
+- `export --target <X>` — Export to specific platform (claude-code, cursor, codex, generic, all)
+- `export --all` — Export to all active platforms
+- `export --force` — Overwrite existing files
+- `sync` — Re-export to all previously exported platforms
+- `list` — List available skills by category
+- `list <category>` — List skills in a specific category
+
+**Targets:**
+| Target | Output Location | Description |
+|--------|-----------------|-------------|
+| `claude-code` | `.claude/skills/babel/` | Claude Code skill files |
+| `cursor` | `.cursor/skills/babel/` | Cursor skill files |
+| `codex` | `.codex/skills/babel/` | Codex skill files |
+| `generic` | `.babel/skills_reference.md` | Monolithic markdown (fallback) |
+| `all` | All detected platforms | Export to all active |
+
+**Skill Categories:**
+- **lifecycle** — Decision lifecycle workflows (capture, review, link)
+- **knowledge** — Knowledge queries (why, status, tensions)
+- **validation** — Decision validation (endorse, evidence, validation)
+- **maintenance** — System health (coherence, check, sync)
+- **preference** — User preferences (memo)
+- **analyze** — Analysis tools (scan)
+
+**When:** After `babel prompt --install`. When setting up new AI platforms. After upgrading Babel (run `babel skill sync`).
+
+---
+
 ## How It Works
 
 ### Data Storage
@@ -3076,8 +3159,6 @@ This Babel does the opposite. It gathers understanding. It preserves intent. It 
 ---
 
 ## Babel Installation Guide
-
-**Package built successfully. 509 tests passing.**
 
 ### Quick Installation Methods
 

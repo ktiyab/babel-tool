@@ -125,3 +125,13 @@ class BaseCommand:
     def memos(self):
         """Memo manager for user preferences (P6)."""
         return self._cli.memos
+
+    @property
+    def orchestrator(self):
+        """Task orchestrator for parallel execution."""
+        return self._cli.orchestrator
+
+    @property
+    def codec(self):
+        """ID codec for session-scoped short aliases."""
+        return self._cli.codec

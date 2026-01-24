@@ -49,3 +49,4 @@ docs/
 
 # Build artifacts
 *.whl
+.commitmessage

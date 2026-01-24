@@ -107,11 +107,10 @@ class ListRenderer(BaseRenderer):
                     item.get("description") or
                     str(item)
                 )
-                # Add ID if present
+                # Add ID if present (using centralized format_id)
                 item_id = item.get("id", "")
                 if item_id:
-                    short_id = item_id[:8] if len(item_id) > 8 else item_id
-                    text = f"[{short_id}] {text}"
+                    text = f"{self.format_id(item_id)} {text}"
             else:
                 text = str(item)
 
@@ -149,9 +148,9 @@ class ListRenderer(BaseRenderer):
             if timestamp and len(timestamp) > 10:
                 timestamp = timestamp[:10]  # Just date part
 
-            # ID
+            # ID (using centralized format_id)
             item_id = item.get("id", "")
-            short_id = item_id[:8] if len(item_id) > 8 else item_id
+            formatted_id = self.format_id(item_id) if item_id else ""
 
             # Content
             content = (
@@ -169,10 +168,10 @@ class ListRenderer(BaseRenderer):
 
             # Build line
             content = self.truncate(content, self.width - 30)
-            if timestamp and short_id:
-                line = f"  {scope_marker} {timestamp} [{short_id}] {content}"
-            elif short_id:
-                line = f"  {scope_marker} [{short_id}] {content}"
+            if timestamp and formatted_id:
+                line = f"  {scope_marker} {timestamp} {formatted_id} {content}"
+            elif formatted_id:
+                line = f"  {scope_marker} {formatted_id} {content}"
             else:
                 line = f"  {scope_marker} {content}"
 

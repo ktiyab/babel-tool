@@ -132,3 +132,43 @@ class GitCommand(BaseCommand):
 
         status = git.hooks_status()
         print(f"Git hooks: {status}")
+
+
+# =============================================================================
+# Command Registration (Self-Registration Pattern)
+# =============================================================================
+
+# Multiple commands registered by this module
+COMMAND_NAMES = ['capture-commit', 'hooks']
+
+
+def register_parser(subparsers):
+    """Register capture-commit and hooks command parsers."""
+    # capture-commit command
+    p1 = subparsers.add_parser('capture-commit', help='Capture last git commit')
+    p1.add_argument('--async', dest='async_mode', action='store_true',
+                    help='Queue extraction for later')
+
+    # hooks command
+    p2 = subparsers.add_parser('hooks', help='Manage git hooks')
+    hooks_sub = p2.add_subparsers(dest='hooks_command')
+    hooks_sub.add_parser('install', help='Install git hooks')
+    hooks_sub.add_parser('uninstall', help='Remove git hooks')
+    hooks_sub.add_parser('status', help='Show hooks status')
+
+    return p1, p2
+
+
+def handle(cli, args):
+    """Handle capture-commit or hooks command dispatch."""
+    if args.command == 'capture-commit':
+        cli._git_cmd.capture_git_commit(async_mode=args.async_mode)
+    elif args.command == 'hooks':
+        if args.hooks_command == 'install':
+            cli._git_cmd.install_hooks()
+        elif args.hooks_command == 'uninstall':
+            cli._git_cmd.uninstall_hooks()
+        elif args.hooks_command == 'status':
+            cli._git_cmd.hooks_status()
+        else:
+            print("Usage: babel hooks {install|uninstall|status}")

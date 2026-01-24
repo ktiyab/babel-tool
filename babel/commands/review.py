@@ -13,7 +13,7 @@ not individual atoms (micro-management).
 from typing import Optional
 
 from .base import BaseCommand
-from ..core.events import Event, EventType, confirm_artifact, require_negotiation
+from ..core.events import Event, EventType, confirm_artifact, reject_proposal, require_negotiation
 from ..core.scope import EventScope
 from ..core.graph import Edge
 from ..presentation.symbols import get_symbols, TableRenderer, safe_print
@@ -32,6 +32,9 @@ class ReviewCommand(BaseCommand):
         list_only: bool = False,
         accept_ids: list = None,
         accept_all: bool = False,
+        reject_ids: list = None,
+        reject_reason: str = None,
+        list_rejected: bool = False,
         output_format: str = None
     ):
         """
@@ -44,6 +47,7 @@ class ReviewCommand(BaseCommand):
             --list: Show proposals without prompting
             --accept <id>: Accept specific proposal(s) by ID
             --accept-all: Accept all proposals at once
+            --reject <id>: Reject specific proposal(s) by ID with reason
 
         Synthesis mode (--synthesize):
             AI clusters proposals into themes with impact assessment.
@@ -51,6 +55,12 @@ class ReviewCommand(BaseCommand):
             Preserves HC2 at appropriate abstraction level.
         """
         symbols = get_symbols()
+
+        # List rejected proposals (P8: Failure Metabolism - learn from rejections)
+        if list_rejected:
+            self._list_rejected(symbols)
+            return
+
         pending = self._get_pending_proposals()
 
         if not pending:
@@ -69,6 +79,10 @@ class ReviewCommand(BaseCommand):
 
         if accept_ids:
             self._accept_by_ids(pending, accept_ids, symbols)
+            return
+
+        if reject_ids:
+            self._reject_by_ids(pending, reject_ids, reject_reason or "Rejected by user", symbols)
             return
 
         if accept_all:
@@ -103,7 +117,7 @@ class ReviewCommand(BaseCommand):
             safe_print(f"  \"{summary}\"")
             if rationale:
                 safe_print(f"  Why: {rationale[:80]}...")
-            print(f"  [ID: {proposal_event.id[:8]}]")
+            print(f"  {self._cli.format_id(proposal_event.id)}")
             print()
             print("Confirm? [y]es / [n]o / [a]ll / [q]uit")
 
@@ -412,7 +426,8 @@ THEME: breaking-api-change | Old endpoints removed, clients must update | high |
         """
         Get proposals awaiting review.
 
-        Returns proposals that have STRUCTURE_PROPOSED but no ARTIFACT_CONFIRMED.
+        Returns proposals that have STRUCTURE_PROPOSED but no ARTIFACT_CONFIRMED
+        and no PROPOSAL_REJECTED.
         """
         # Get all proposal events
         proposed_events = self.events.read_by_type(EventType.STRUCTURE_PROPOSED)
@@ -421,8 +436,13 @@ THEME: breaking-api-change | Old endpoints removed, clients must update | high |
         confirmed_events = self.events.read_by_type(EventType.ARTIFACT_CONFIRMED)
         confirmed_ids = {e.data.get('proposal_id') for e in confirmed_events}
 
-        # Filter to pending (not yet confirmed)
-        pending = [e for e in proposed_events if e.id not in confirmed_ids]
+        # Get all rejected proposal IDs
+        rejected_events = self.events.read_by_type(EventType.PROPOSAL_REJECTED)
+        rejected_ids = {e.data.get('proposal_id') for e in rejected_events}
+
+        # Filter to pending (not confirmed and not rejected)
+        pending = [e for e in proposed_events
+                   if e.id not in confirmed_ids and e.id not in rejected_ids]
 
         return pending
 
@@ -440,11 +460,11 @@ THEME: breaking-api-change | Old endpoints removed, clients must update | high |
             artifact_type = content.get('type', 'unknown')
             summary = content.get('summary', 'No summary')
             rationale = content.get('rationale', '')
-            short_id = proposal_event.id[:8]
+            formatted_id = self._cli.format_id(proposal_event.id)
 
-            # Dual-Display: [ID] [TYPE] summary
+            # Dual-Display: [ID alias] [TYPE] summary
             # Layer 2 (Encoding): Use safe_print for LLM-generated content
-            safe_print(f"{i+1}. [{short_id}] [{artifact_type.upper()}] {summary}")
+            safe_print(f"{i+1}. {formatted_id} [{artifact_type.upper()}] {summary}")
             if rationale:
                 safe_print(f"   WHY: {rationale[:80]}{'...' if len(rationale) > 80 else ''}")
             print()
@@ -453,6 +473,10 @@ THEME: breaking-api-change | Old endpoints removed, clients must update | high |
         print("  babel review --accept <id>        # Accept specific proposal")
         print("  babel review --accept-all         # Accept all proposals")
         print("  babel review                      # Interactive review")
+        print()
+        print("Reject with:")
+        print("  babel review --reject <id>        # Reject specific proposal")
+        print("  babel review --reject <id> --reason \"...\"  # Reject with custom reason")
 
         # Succession hint
         from ..output import end_command
@@ -472,7 +496,7 @@ THEME: breaking-api-change | Old endpoints removed, clients must update | high |
 
             rows.append({
                 "n": i + 1,
-                "id": proposal_event.id[:8],
+                "code": self._cli.codec.encode(proposal_event.id),
                 "type": artifact_type.upper(),
                 "summary": summary[:50],
                 "rationale": rationale[:40] if rationale else "-"
@@ -497,31 +521,30 @@ THEME: breaking-api-change | Old endpoints removed, clients must update | high |
 
     def _accept_by_ids(self, pending: list, accept_ids: list, symbols):
         """
-        Accept specific proposals by ID (AI-safe).
+        Accept specific proposals by ID or code alias (AI-safe).
 
         Args:
             pending: List of pending proposal events
-            accept_ids: List of proposal IDs (partial match supported)
+            accept_ids: List of proposal IDs, prefixes, or AA-BB code aliases
             symbols: Display symbols
         """
         decisions_confirmed = []
         accepted = 0
         not_found = []
 
-        for accept_id in accept_ids:
-            # Find matching proposal (partial ID match)
-            matching = [p for p in pending if p.id.startswith(accept_id)]
+        # Build candidate list for centralized resolution
+        candidate_ids = [p.id for p in pending]
+        pending_by_id = {p.id: p for p in pending}
 
-            if not matching:
+        for accept_id in accept_ids:
+            # Use centralized resolver (supports codec aliases)
+            resolved_id = self._cli.resolve_id(accept_id, candidate_ids, "proposal")
+
+            if not resolved_id:
                 not_found.append(accept_id)
                 continue
 
-            if len(matching) > 1:
-                print(f"Ambiguous ID '{accept_id}' matches {len(matching)} proposals.")
-                print("Use more characters to disambiguate.")
-                continue
-
-            proposal_event = matching[0]
+            proposal_event = pending_by_id[resolved_id]
             result = self._confirm_pending_proposal(proposal_event)
             accepted += 1
 
@@ -570,6 +593,122 @@ THEME: breaking-api-change | Old endpoints removed, clients must update | high |
 
         print(f"\n{symbols.check_pass} Accepted all {len(pending)} proposal(s).")
         self._print_validation_hints(decisions_confirmed, symbols)
+
+    def _reject_by_ids(self, pending: list, reject_ids: list, reason: str, symbols):
+        """
+        Reject specific proposals by ID or code alias (AI-safe).
+
+        Rejection is recorded as an event (HC1: append-only), not deletion.
+        The reason enables learning from rejected proposals (P8: Failure Metabolism).
+
+        Args:
+            pending: List of pending proposal events
+            reject_ids: List of proposal IDs, prefixes, or AA-BB code aliases
+            reason: Reason for rejection
+            symbols: Display symbols
+        """
+        rejected = 0
+        not_found = []
+
+        # Build candidate list for centralized resolution
+        candidate_ids = [p.id for p in pending]
+        pending_by_id = {p.id: p for p in pending}
+
+        for reject_id in reject_ids:
+            # Use centralized resolver (supports codec aliases)
+            resolved_id = self._cli.resolve_id(reject_id, candidate_ids, "proposal")
+
+            if not resolved_id:
+                not_found.append(reject_id)
+                continue
+
+            proposal_event = pending_by_id[resolved_id]
+
+            # Create rejection event (HC1: append-only, P8: capture reason)
+            rejection_event = reject_proposal(
+                proposal_id=proposal_event.id,
+                reason=reason,
+                author="user"
+            )
+            self.events.append(rejection_event, scope=EventScope.SHARED)
+
+            content = proposal_event.data.get('proposed', {})
+            artifact_type = content.get('type', 'unknown')
+            summary = content.get('summary', 'No summary')
+
+            # Layer 2 (Encoding): Use safe_print for LLM-generated content
+            safe_print(f"{symbols.check_fail} Rejected [{artifact_type.upper()}] {summary[:50]}...")
+            rejected += 1
+
+        if not_found:
+            print(f"\nNot found: {', '.join(not_found)}")
+            print("Use 'babel review --list' to see available IDs.")
+
+        if rejected > 0:
+            print(f"\nRejected {rejected} proposal(s).")
+            print(f"Reason: {reason}")
+
+            # Succession hint
+            from ..output import end_command
+            end_command("review", {})
+
+    def _list_rejected(self, symbols):
+        """
+        List rejected proposals with reasons (P8: Failure Metabolism).
+
+        Shows all rejected proposals with their rejection reasons,
+        enabling learning from what didn't work.
+
+        P8: "False artifacts → Lessons → Principles"
+        """
+        # Get all rejection events
+        rejected_events = self.events.read_by_type(EventType.PROPOSAL_REJECTED)
+
+        if not rejected_events:
+            print("No rejected proposals.")
+            print("\nReject proposals with:")
+            print("  babel review --reject <id> --reason \"...\"")
+            from ..output import end_command
+            end_command("review", {})
+            return
+
+        # Get all proposed events to look up original content
+        proposed_events = self.events.read_by_type(EventType.STRUCTURE_PROPOSED)
+        proposed_by_id = {e.id: e for e in proposed_events}
+
+        print(f"{len(rejected_events)} rejected proposal(s):\n")
+
+        for rejection in rejected_events:
+            proposal_id = rejection.data.get('proposal_id', '')
+            reason = rejection.data.get('reason', 'No reason provided')
+            rejection_date = rejection.timestamp[:10] if rejection.timestamp else 'Unknown'
+
+            # Find original proposal
+            original = proposed_by_id.get(proposal_id)
+            if original:
+                content = original.data.get('proposed', {})
+                artifact_type = content.get('type', 'unknown')
+                summary = content.get('summary', 'No summary')
+            else:
+                artifact_type = 'unknown'
+                summary = 'Original proposal not found'
+
+            alias = self._cli.codec.encode(proposal_id) if proposal_id else 'unknown'
+
+            # Display: [ID] [TYPE] summary
+            safe_print(f"{symbols.check_fail} [{alias}] [{artifact_type.upper()}] {summary}")
+            safe_print(f"   REASON: {reason}")
+            print(f"   DATE: {rejection_date}")
+            print()
+
+        # P8 hint: Learn from rejections
+        print("P8 (Failure Metabolism): Rejections are lessons.")
+        print("Consider: What pattern led to these rejections?")
+        print("\nQuery rejection context with:")
+        print("  babel why \"rejected topic\"  (once indexed)")
+
+        from ..output import end_command
+        end_command("review", {})
 
     def _confirm_pending_proposal(self, proposal_event) -> dict:
         """
@@ -634,7 +773,7 @@ THEME: breaking-api-change | Old endpoints removed, clients must update | high |
 
         return {
             'artifact_type': artifact_type,
-            'node_id': node_id or proposal_event.id[:8],
+            'node_id': node_id or self._cli.codec.encode(proposal_event.id),
             'summary': summary,
             'requires_negotiation': negotiation_result
         }
@@ -722,9 +861,18 @@ THEME: breaking-api-change | Old endpoints removed, clients must update | high |
         print(f"\nTo validate: babel endorse <id> and babel evidence-decision <id> \"...\"")
         print(f"Check status: babel validation")
 
+        # Check for unlinked artifacts to guide succession
+        orphan_count = self.graph.stats().get('orphans', 0)
+        has_unlinked = orphan_count > 0
+
         # Succession hint (centralized)
+        # Prioritize linking when artifacts just accepted and unlinked exist (P7)
         from ..output import end_command
-        end_command("review", {"has_decisions": True})
+        end_command("review", {
+            "has_decisions": True,
+            "just_accepted_with_unlinked": has_unlinked,
+            "many_unlinked": orphan_count > 10
+        })
 
     # -------------------------------------------------------------------------
     # Constraint overlap detection (requires_negotiation)
@@ -832,3 +980,71 @@ THEME: breaking-api-change | Old endpoints removed, clients must update | high |
 
         # Single overlap with soft constraint → info
         return "info"
+
+
+# =============================================================================
+# Command Registration (Self-Registration Pattern)
+# =============================================================================
+
+# Multiple commands registered by this module
+COMMAND_NAMES = ['review', 'share', 'sync']
+
+
+def register_parser(subparsers):
+    """Register review, share, and sync command parsers."""
+    # review command
+    p1 = subparsers.add_parser('review', help='Review pending proposals (HC2: Human Authority)')
+    p1.add_argument('--synthesize', '-s', action='store_true',
+                    help='Synthesize proposals into themes for directional review')
+    p1.add_argument('--by-theme', action='store_true',
+                    help='Review by theme (requires --synthesize first)')
+    p1.add_argument('--accept-theme', metavar='THEME',
+                    help='Accept all proposals in a theme (non-interactive)')
+    p1.add_argument('--list-themes', action='store_true',
+                    help='List synthesized themes without reviewing')
+    p1.add_argument('--list', action='store_true',
+                    help='List proposals without prompting (AI-safe)')
+    p1.add_argument('--accept', metavar='ID', action='append',
+                    help='Accept specific proposal by ID (can repeat)')
+    p1.add_argument('--accept-all', action='store_true',
+                    help='Accept all proposals (AI-safe)')
+    p1.add_argument('--reject', metavar='ID', action='append',
+                    help='Reject specific proposal by ID with reason (AI-safe, can repeat)')
+    p1.add_argument('--reason', default='Rejected by user',
+                    help='Reason for rejection (used with --reject)')
+    p1.add_argument('--rejected', action='store_true',
+                    help='List rejected proposals with reasons (P8: learn from rejections)')
+    p1.add_argument('--format', '-f', choices=['auto', 'table', 'list', 'json'],
+                    help='Output format for --list (overrides config)')
+
+    # share command
+    p2 = subparsers.add_parser('share', help='Share a local event with team')
+    p2.add_argument('event_id', help='Event ID (or prefix) to share')
+
+    # sync command
+    p3 = subparsers.add_parser('sync', help='Sync events after git pull')
+    p3.add_argument('-v', '--verbose', action='store_true', help='Show details')
+
+    return p1, p2, p3
+
+
+def handle(cli, args):
+    """Handle review, share, or sync command dispatch."""
+    if args.command == 'review':
+        cli._review_cmd.review(
+            synthesize=args.synthesize,
+            by_theme=args.by_theme,
+            accept_theme=args.accept_theme,
+            list_themes=args.list_themes,
+            list_only=getattr(args, 'list', False),
+            accept_ids=args.accept,
+            accept_all=args.accept_all,
+            reject_ids=args.reject,
+            reject_reason=args.reason,
+            list_rejected=args.rejected,
+            output_format=getattr(args, 'format', None)
+        )
+    elif args.command == 'share':
+        cli.share(args.event_id)
+    elif args.command == 'sync':
+        cli.sync(verbose=args.verbose)

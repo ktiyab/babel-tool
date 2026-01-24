@@ -108,7 +108,7 @@ class GapsCommand(BaseCommand):
             nodes = self.graph.get_nodes_by_type(node_type)
             for node in nodes:
                 node_id = node.event_id or node.id
-                short_id = node_id[:8] if node.event_id else node.id.split('_', 1)[-1][:8]
+                alias = self._cli.codec.encode(node.id)
 
                 # Check if linked (match full ID or prefix)
                 is_linked = any(
@@ -128,7 +128,7 @@ class GapsCommand(BaseCommand):
 
                     unlinked.append({
                         'id': node_id,
-                        'short_id': short_id,
+                        'short_id': alias,
                         'type': node_type,
                         'summary': summary,
                         'node': node
@@ -216,3 +216,38 @@ class GapsCommand(BaseCommand):
         # Navigation
         if paginator.has_more():
             print(f"  {symbols.arrow} More: babel gaps --commits --offset {paginator.offset + paginator.limit}")
+
+
+# =============================================================================
+# Command Registration (Self-Registration Pattern)
+# =============================================================================
+
+COMMAND_NAME = 'gaps'
+
+
+def register_parser(subparsers):
+    """Register gaps command parser."""
+    p = subparsers.add_parser('gaps',
+                              help='Show implementation gaps between decisions and commits')
+    p.add_argument('--commits', action='store_true',
+                   help='Only show unlinked commits')
+    p.add_argument('--decisions', action='store_true',
+                   help='Only show unlinked decisions')
+    p.add_argument('--from-recent', dest='from_recent', type=int, default=20,
+                   help='Number of recent commits to check (default: 20)')
+    p.add_argument('--limit', type=int, default=10,
+                   help='Maximum items per section (default: 10)')
+    p.add_argument('--offset', type=int, default=0,
+                   help='Skip first N items (default: 0)')
+    return p
+
+
+def handle(cli, args):
+    """Handle gaps command dispatch."""
+    cli._gaps_cmd.gaps(
+        show_commits=args.commits,
+        show_decisions=args.decisions,
+        from_recent=args.from_recent,
+        limit=args.limit,
+        offset=args.offset
+    )

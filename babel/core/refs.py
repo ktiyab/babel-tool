@@ -269,7 +269,18 @@ class RefStore:
         
         elif event.type == EventType.COMMIT_CAPTURED:
             self.append("commits", event.id, updated_at=now)
-        
+
+        elif event.type == EventType.PROPOSAL_REJECTED:
+            # P8: Failure Metabolism - index rejections for learning
+            self.append("decisions/rejected", event.id, updated_at=now)
+
+            # Also index rejection reason as topic for `why` queries
+            reason = event.data.get("reason", "")
+            if reason:
+                reason_words = _extract_words(reason)
+                for word in reason_words[:5]:  # Limit to key terms
+                    self.append(f"topics/{word}", event.id, updated_at=now)
+
         # Save vocabulary if provided (persist learned terms)
         if vocabulary:
             vocabulary.save()
@@ -352,7 +363,7 @@ def _get_event_text(event: Event) -> str:
     data = event.data
     
     # Common fields
-    for key in ['content', 'purpose', 'summary', 'message', 'body']:
+    for key in ['content', 'purpose', 'summary', 'message', 'body', 'reason']:
         if key in data:
             value = data[key]
             if isinstance(value, str):

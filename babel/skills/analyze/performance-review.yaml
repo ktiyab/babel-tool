@@ -1,0 +1,36 @@
+name: performance-review
+category: analyze
+description: Bottleneck and efficiency analysis - performance review considering actual load expectations from purpose
+trigger: Performance concerns, "analyze performance", "find bottlenecks", speed issues
+
+commands:
+  - babel why "performance"
+  - babel scan --type performance
+  - babel scan --type performance --deep
+
+principles:
+  - P3 (Expertise-Weighted)
+
+uses_context:
+  - Project purpose (load expectations)
+  - Tech stack
+  - Performance-related decisions
+
+produces:
+  - Bottleneck risk assessment
+  - Scalability alignment with purpose
+  - Resource efficiency evaluation
+  - Caching opportunities
+  - Query pattern analysis
+
+composable_with:
+  - recall
+  - challenge
+
+always_load: false
+load_on_demand: true
+user_invocable: true
+
+# Context-aware analysis:
+# Considers actual load expectations based on purpose
+# Not generic "this could be slow" warnings

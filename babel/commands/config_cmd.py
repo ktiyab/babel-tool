@@ -103,3 +103,55 @@ class ConfigCommand(BaseCommand):
                 print(f"Saved to: {self._cli.config_manager.project_config_path}")
             else:
                 print(f"Saved to: {self._cli.config_manager.user_config_path}")
+
+
+# =============================================================================
+# Command Registration (Self-Registration Pattern)
+# =============================================================================
+
+# Multiple commands registered by this module
+COMMAND_NAMES = ['config', 'process-queue', 'help', 'principles']
+
+
+def register_parser(subparsers):
+    """Register config, process-queue, help, and principles command parsers."""
+    # config command
+    p1 = subparsers.add_parser('config', help='View or set configuration')
+    p1.add_argument('--set', metavar='KEY=VALUE',
+                    help='Set config value (e.g., llm.provider=openai)')
+    p1.add_argument('--user', action='store_true',
+                    help='Apply to user config instead of project')
+
+    # process-queue command
+    p2 = subparsers.add_parser('process-queue',
+                               help='Process queued extractions (after offline)')
+    p2.add_argument('--batch', action='store_true',
+                    help='Queue proposals for review instead of interactive confirm (for AI assistants)')
+
+    # help command
+    subparsers.add_parser('help', help='Show comprehensive help for all commands')
+
+    # principles command
+    subparsers.add_parser('principles', help='Show Babel principles for self-check (P11)')
+
+    return p1, p2
+
+
+def handle(cli, args):
+    """Handle config, process-queue, help, or principles command dispatch."""
+    if args.command == 'config':
+        if args.set:
+            if '=' not in args.set:
+                print("Error: Use format KEY=VALUE (e.g., llm.provider=openai)")
+            else:
+                key, value = args.set.split('=', 1)
+                scope = "user" if args.user else "project"
+                cli._config_cmd.set_config(key, value, scope)
+        else:
+            cli._config_cmd.show_config()
+    elif args.command == 'process-queue':
+        cli._config_cmd.process_queue(batch_mode=args.batch)
+    elif args.command == 'help':
+        cli.help()
+    elif args.command == 'principles':
+        cli.principles()

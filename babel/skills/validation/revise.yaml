@@ -1,0 +1,255 @@
+name: revise
+category: validation
+description: Supersede artifact with traceable evolution. Use full challenge chain — never silent replacement. Maintains P4 (Disagreement as Hypothesis) and P8 (Evolution Traceable).
+trigger: Artifact scope wrong, context changed (external factors), better understanding emerged, coherence shows low alignment for multiple artifacts, user says "this is wrong"
+
+commands:
+  # 1. Identify problem
+  - babel coherence --full
+  # 2. Challenge
+  - 'babel challenge <id> "why scope is wrong"'
+  # 3. Build evidence (multiple pieces)
+  - 'babel evidence <challenge_id> "observation 1"'
+  - 'babel evidence <challenge_id> "observation 2"'
+  # 4. Capture replacement
+  - 'babel capture "corrected artifact" --batch'
+  # 5. Resolve with supersession
+  - 'babel resolve <challenge_id> --outcome revised --force --resolution "Superseded by <new_id>"'
+  # 6. Create evolves_from link
+  - babel link <new_id> <old_id>
+  # 7. Re-link dependent artifacts
+  - babel link <artifact_id>
+
+principles:
+  - P4 (Disagreement as Hypothesis) - Changes framed as testable claims
+  - P8 (Evolution Traceable) - Supersession chain must be explicit
+
+uses_context:
+  - Artifact to supersede
+  - Evidence of scope issue
+  - New understanding to capture
+  - Dependent artifacts to re-link
+
+produces:
+  - Challenge record with evidence chain
+  - New artifact (replacement)
+  - Resolution linking old to new
+  - Evolves_from relationship in graph
+  - Traceable supersession history
+
+composable_with:
+  - challenge (revise uses challenge workflow)
+  - verify (coherence triggers revise need)
+  - connect (re-link after revision)
+  - tension (revise resolves tensions via revision)
+
+always_load: false
+load_on_demand: true
+user_invocable: true
+
+examples:
+  - |
+    ## FLOW 12: REVISE — Challenge and Supersede Artifacts (P4, P8)
+
+    **CRITICAL:** Never skip this flow.
+
+    Direct replacement without challenge violates:
+    - **P4 (Disagreement as Hypothesis):** Changes must be framed as testable claims
+    - **P8 (Evolution Traceable):** Supersession chain must be explicit
+
+    | Approach | Result |
+    |----------|--------|
+    | Full challenge chain | Traceable, documented, approved |
+    | Silent replacement | History broken, drift invisible |
+
+  - |
+    ### Trigger Patterns
+
+    When to use the revise skill:
+
+    | Trigger | Example |
+    |---------|---------|
+    | Coherence shows low alignment | Multiple artifacts don't match purpose |
+    | Scope creep detected | Original constraint too narrow/broad |
+    | Context changed | External factors invalidate old decision |
+    | Better understanding | New evidence contradicts old reasoning |
+    | User says "this is wrong" | Explicit disagreement with prior artifact |
+
+  - |
+    ### Command Lifecycle
+
+    ```
+    coherence --full → challenge <id> → evidence(×N) → capture replacement
+    → [review] → resolve --outcome revised → link <new> <old> → re-link artifacts
+    ```
+
+    **7 steps, none optional.**
+
+  - |
+    ### Complete Workflow Example
+
+    ```bash
+    # Scenario: Purpose too narrow — only covers memo feature
+
+    # Step 1: Identify the problem
+    babel coherence --full
+    # Observation: "Purpose too narrow — only covers memo feature"
+
+    # Step 2: Challenge with reason
+    babel challenge 93ef8a03 "Purpose too narrow - covers only memo feature, not full Babel scope"
+
+    # Step 3: Build evidence (multiple pieces)
+    babel evidence f78203a2 "5 artifacts showed low alignment: list, pagination, AI-safe"
+    babel evidence f78203a2 "Babel has 28 commands across multiple domains, not just memo"
+
+    # Step 4: Capture the replacement (before resolving)
+    babel capture "Babel preserves intent and reasoning across AI sessions and team collaboration" --batch
+    # User accepts → new purpose [6f12bcf0]
+
+    # Step 5: Resolve with explicit supersession
+    babel resolve f78203a2 --outcome revised --force --resolution "Superseded by 6f12bcf0"
+
+    # Step 6: Create evolves_from link
+    babel link 6f12bcf0 93ef8a03
+
+    # Step 7: Re-link artifacts to new purpose
+    babel link 99e49727    # Previously low-alignment
+    babel link 69cce99d    # Now connects to new purpose
+    ```
+
+  - |
+    ### The evolves_from Link
+
+    When resolving with `--outcome revised`, create evolution chain:
+
+    ```bash
+    babel link <new_artifact_id> <old_artifact_id>
+    ```
+
+    This creates `evolves_from` relationship enabling:
+    - `babel history` shows lineage
+    - Graph traversal follows evolution
+    - P8 compliance maintained
+
+    **Don't skip this link** — it's what makes revision traceable.
+
+  - |
+    ### WRONG Approach (DO NOT DO THIS)
+
+    ```bash
+    # DON'T DO THIS (violates P4, P8)
+    babel capture "new broader purpose" --batch     # No challenge
+    # User accepts
+    # Old purpose still exists, no supersession link
+    # → History broken, drift invisible
+    ```
+
+    **Problems:**
+    - P4 violated — no hypothesis, no testable claim
+    - P8 violated — no evolution chain
+    - Old artifact orphaned — confuses future queries
+    - `babel why` returns stale context
+
+  - |
+    ### Why This Matters
+
+    | Aspect | Benefit |
+    |--------|---------|
+    | **Traceability** | `babel history <id>` shows WHY revision happened |
+    | **No silent drift** | Change is deliberate, documented, human-approved |
+    | **Evidence-based** | Observations support change, not just opinion |
+    | **Graph integrity** | Evolution chain enables intelligent queries |
+
+  - |
+    ### Connection to Challenge Flow
+
+    REVISE is built on CHALLENGE:
+
+    ```
+    CHALLENGE: challenge → evidence(×N) → resolve
+    REVISE:    challenge → evidence(×N) → capture → resolve → link → re-link
+    ```
+
+    **Additional steps:**
+    - Capture replacement artifact
+    - Create evolves_from link
+    - Re-link dependent artifacts
+
+    See `validation/challenge` skill for challenge basics.
+
+  - |
+    ### Connection to Tension Flow
+
+    REVISE often resolves tensions:
+
+    | Tension Type | Resolution |
+    |--------------|------------|
+    | Artifact conflicts with purpose | Revise artifact OR revise purpose |
+    | Two artifacts contradict | Revise one, dissolve other |
+    | Scope too narrow | Revise to broader scope |
+
+    `babel tensions` → identify conflict → REVISE flow → resolution
+
+  - |
+    ### Re-Linking Artifacts
+
+    After creating new artifact, re-link dependents:
+
+    ```bash
+    # Find artifacts that linked to old purpose
+    babel list --from 93ef8a03
+
+    # Re-link each to new purpose
+    babel link 99e49727    # Low-alignment before, coherent now
+    babel link 69cce99d
+    babel link a1b2c3d4
+    ```
+
+    **Why:** Without re-linking, artifacts point to superseded artifact.
+
+  - |
+    ### Common Mistakes
+
+    | Mistake | Why It's Wrong | Fix |
+    |---------|----------------|-----|
+    | Capture without challenge | No traceability (P4/P8 violated) | Full challenge chain |
+    | Skip evidence | Resolution is arbitrary | Build evidence first |
+    | Skip evolves_from link | Evolution chain broken | `babel link <new> <old>` |
+    | Skip re-linking | Dependents point to old artifact | Re-link all dependents |
+    | Resolve without replacement | Old artifact orphaned | Capture replacement first |
+
+  - |
+    ### Consequence of Skipping
+
+    | Skip | Result |
+    |------|--------|
+    | Skip challenge | No hypothesis, P4 violated |
+    | Skip evidence | No justification, arbitrary change |
+    | Skip evolves_from link | History broken, P8 violated |
+    | Skip re-linking | Dependents orphaned, stale connections |
+    | Skip entire flow | Silent drift, invisible history |
+
+    **Rule:** Supersession invisible = history broken = P4/P8 violated.
+
+  - |
+    ### The Rule (Summary)
+
+    ```
+    WORKFLOW:
+      coherence → challenge → evidence(×N) → capture replacement
+      → [review] → resolve --outcome revised → link <new> <old> → re-link
+
+    NEVER:
+      capture "new artifact" --batch  # Without challenge chain
+
+    KEY LINKS:
+      1. babel link <new_id> <old_id>    # evolves_from
+      2. babel link <dependent_id>        # re-link dependents
+
+    PRINCIPLES:
+      - P4: Changes are testable hypotheses
+      - P8: Evolution chain is explicit
+    ```
+
+    **Direct replacement without challenge = history destroyed.**
+

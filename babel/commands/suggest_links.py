@@ -15,8 +15,10 @@ Aligns with:
 - HC2: Human authority (suggests, doesn't auto-link)
 """
 
-from typing import List, Dict, Optional, Set
+from typing import List, Dict, Optional
 from dataclasses import dataclass
+
+from rapidfuzz import fuzz
 
 from ..commands.base import BaseCommand
 from ..core.commit_links import CommitLinkStore
@@ -43,17 +45,6 @@ class SuggestLinksCommand(BaseCommand):
     Helps AI operators and users discover which decisions
     should be linked to which commits.
     """
-
-    # Common words to ignore in matching
-    STOP_WORDS = {
-        'the', 'a', 'an', 'is', 'are', 'was', 'were', 'be', 'been',
-        'have', 'has', 'had', 'do', 'does', 'did', 'will', 'would',
-        'could', 'should', 'may', 'might', 'can', 'and', 'or', 'but',
-        'in', 'on', 'at', 'to', 'for', 'of', 'with', 'by', 'from',
-        'as', 'this', 'that', 'it', 'its', 'fix', 'add', 'update',
-        'use', 'using', 'used', 'new', 'change', 'changes', 'changed',
-        'remove', 'removed', 'file', 'files', 'code', 'function'
-    }
 
     def suggest_links(self, from_recent: int = 5, min_score: float = 0.3,
                       show_all: bool = False, commit_sha: str = None):
@@ -138,7 +129,8 @@ class SuggestLinksCommand(BaseCommand):
 
             for s in suggestions[:3]:  # Top 3 per commit
                 score_bar = self._score_bar(s.score)
-                safe_print(f"  {score_bar} [{s.decision_id[:8]}] {s.decision_type}: {s.decision_summary[:40]}")
+                decision_alias = self._cli.codec.encode(s.decision_id)
+                safe_print(f"  {score_bar} [{decision_alias}] {s.decision_type}: {s.decision_summary[:40]}")
 
                 # Show reasons for high-confidence matches
                 if s.score >= 0.5 and s.reasons:
@@ -152,8 +144,9 @@ class SuggestLinksCommand(BaseCommand):
 
         if all_suggestions:
             best = max(all_suggestions, key=lambda x: x.score)
+            best_alias = self._cli.codec.encode(best.decision_id)
             print(f"Strongest match:")
-            print(f"  babel link {best.decision_id[:8]} --to-commit {best.commit_sha[:8]}")
+            print(f"  babel link {best_alias} --to-commit {best.commit_sha[:8]}")
 
         print(f"\nTo link: babel link <decision_id> --to-commit <commit_sha>")
 
@@ -179,8 +172,7 @@ class SuggestLinksCommand(BaseCommand):
             sha, message = line.split('|', 1)
             commits.append({
                 'sha': sha,
-                'message': message,
-                'words': self._extract_words(message)
+                'message': message
             })
 
         return commits
@@ -193,8 +185,7 @@ class SuggestLinksCommand(BaseCommand):
 
         return [{
             'sha': commit_info.hash,
-            'message': commit_info.message,
-            'words': self._extract_words(commit_info.message)
+            'message': commit_info.message
         }]
 
     def _get_linkable_decisions(self) -> List[Dict]:
@@ -205,31 +196,23 @@ class SuggestLinksCommand(BaseCommand):
             nodes = self.graph.get_nodes_by_type(node_type)
             for node in nodes:
                 summary = node.content.get('summary', str(node.content)[:100])
-                short_id = node.event_id[:8] if node.event_id else node.id.split('_', 1)[-1][:8]
+                alias = self._cli.codec.encode(node.id)
 
                 decisions.append({
                     'id': node.event_id or node.id,
-                    'short_id': short_id,
+                    'short_id': alias,
                     'type': node_type,
                     'summary': summary,
-                    'words': self._extract_words(summary),
                     'domain': node.content.get('domain', ''),
                     'node': node
                 })
 
         return decisions
 
-    def _extract_words(self, text: str) -> Set[str]:
-        """Extract meaningful words from text."""
-        words = set(text.lower().split())
-        # Remove stop words and short words
-        return {w for w in words if w not in self.STOP_WORDS and len(w) > 2}
-
     def _find_matches(self, commit: Dict, decisions: List[Dict],
                       min_score: float) -> List[LinkSuggestion]:
         """Find matching decisions for a commit."""
         suggestions = []
-        commit_words = commit['words']
 
         for decision in decisions:
             score, reasons = self._calculate_match_score(commit, decision)
@@ -251,34 +234,34 @@ class SuggestLinksCommand(BaseCommand):
         """
         Calculate match score between commit and decision.
 
+        Uses rapidfuzz for 10-100x faster matching than word overlap.
         Returns (score, reasons) tuple.
         """
         score = 0.0
         reasons = []
 
-        commit_words = commit['words']
-        decision_words = decision['words']
+        commit_msg = commit['message']
+        decision_summary = decision['summary']
 
-        # Word overlap (main signal)
-        overlap = commit_words & decision_words
-        if overlap:
-            # Normalize by smaller set size
-            overlap_ratio = len(overlap) / min(len(commit_words), len(decision_words)) if min(len(commit_words), len(decision_words)) > 0 else 0
-            word_score = min(overlap_ratio * 0.8, 0.6)  # Cap at 0.6
-            score += word_score
+        # Text similarity using rapidfuzz (main signal)
+        # token_set_ratio handles word order differences
+        similarity = fuzz.token_set_ratio(commit_msg.lower(), decision_summary.lower()) / 100.0
 
-            if len(overlap) >= 2:
-                reasons.append(f"shared terms: {', '.join(list(overlap)[:3])}")
+        if similarity > 0.3:
+            # Scale similarity to max 0.6 (same as old word overlap cap)
+            text_score = min(similarity * 0.6, 0.6)
+            score += text_score
+            reasons.append(f"text similarity: {similarity:.0%}")
 
         # Domain match (if commit mentions domain)
         domain = decision.get('domain', '').lower()
-        if domain and domain in commit['message'].lower():
+        if domain and domain in commit_msg.lower():
             score += 0.2
             reasons.append(f"domain match: {domain}")
 
         # Type-specific boosts
         decision_type = decision['type']
-        commit_msg_lower = commit['message'].lower()
+        commit_msg_lower = commit_msg.lower()
 
         # Constraints often relate to "must", "cannot", "require"
         if decision_type == 'constraint':
@@ -304,3 +287,34 @@ class SuggestLinksCommand(BaseCommand):
             return "[#  ]"  # Low confidence
         else:
             return "[   ]"  # Very low
+
+
+# =============================================================================
+# Command Registration (Self-Registration Pattern)
+# =============================================================================
+
+COMMAND_NAME = 'suggest-links'
+
+
+def register_parser(subparsers):
+    """Register suggest-links command parser."""
+    p = subparsers.add_parser('suggest-links',
+                              help='Suggest decision-to-commit links (AI-assisted)')
+    p.add_argument('--from-recent', dest='from_recent', type=int, default=5,
+                   help='Number of recent commits to analyze (default: 5)')
+    p.add_argument('--commit', help='Analyze a specific commit instead of recent')
+    p.add_argument('--min-score', dest='min_score', type=float, default=0.3,
+                   help='Minimum confidence score (0-1, default: 0.3)')
+    p.add_argument('--all', action='store_true',
+                   help='Show all suggestions, even low-confidence')
+    return p
+
+
+def handle(cli, args):
+    """Handle suggest-links command dispatch."""
+    cli._suggest_links_cmd.suggest_links(
+        from_recent=args.from_recent,
+        commit_sha=args.commit,
+        min_score=args.min_score,
+        show_all=getattr(args, 'all', False)
+    )

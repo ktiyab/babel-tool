@@ -48,7 +48,7 @@ class QuestionsCommand(BaseCommand):
 
         domain_tag = f" [{question.domain}]" if question.domain else ""
 
-        print(f"\n? Open question raised [{question.id[:8]}]{domain_tag}")
+        print(f"\n? Open question raised {self._cli.format_id(question.id)}{domain_tag}")
         print(f"  {content}")
         if context:
             print(f"  Context: {context}")
@@ -87,7 +87,7 @@ class QuestionsCommand(BaseCommand):
         # Succession hint (centralized)
         from ..output import end_command
         has_open = self.questions.count_open() > 0
-        end_command("questions", {"has_open": has_open})
+        end_command("questions", {"has_questions": has_open, "no_questions": not has_open})
 
     def _questions_as_output(self, verbose: bool = False, full: bool = False):
         """Return questions data as OutputSpec for rendering."""
@@ -101,7 +101,7 @@ class QuestionsCommand(BaseCommand):
             domain_tag = f"[{q.domain}]" if q.domain else "-"
 
             rows.append({
-                "id": q.id[:8],
+                "id": self._cli.codec.encode(q.id),
                 "question": q.content[:50] if not full else q.content,
                 "domain": domain_tag,
                 "status": q.status,
@@ -137,19 +137,17 @@ class QuestionsCommand(BaseCommand):
         """
         symbols = self.symbols
 
-        # Find question
+        # Find question using centralized resolve_id
         questions_list = self.questions.get_open_questions()
-        target = None
-        for q in questions_list:
-            if q.id.startswith(question_id):
-                target = q
-                break
+        candidate_ids = [q.id for q in questions_list]
+        resolved_id = self._cli.resolve_id(question_id, candidate_ids, "question")
+        target = next((q for q in questions_list if q.id == resolved_id), None) if resolved_id else None
 
         if not target:
             print(f"Open question not found: {question_id}")
             print("\nOpen questions:")
             for q in questions_list[:5]:
-                print(f"  {q.id[:8]} | {q.content[:40]}...")
+                print(f"  {self._cli.format_id(q.id)} {q.content[:40]}...")
             return
 
         # Validate outcome
@@ -176,7 +174,7 @@ class QuestionsCommand(BaseCommand):
             }
             icon = outcome_icons.get(outcome, symbols.validated)
 
-            print(f"\n{icon} Question resolved [{target.id[:8]}]")
+            print(f"\n{icon} Question resolved {self._cli.format_id(target.id)}")
             print(f"  Question: {target.content[:50]}...")
             print(f"  Outcome: {outcome}")
             print(f"  Resolution: {resolution}")
@@ -187,3 +185,62 @@ class QuestionsCommand(BaseCommand):
             end_command("resolve-question", {"has_remaining": remaining > 0})
         else:
             print("Failed to resolve question.")
+
+
+# =============================================================================
+# Command Registration (Self-Registration Pattern)
+# =============================================================================
+
+# Multiple commands registered by this module
+COMMAND_NAMES = ['questions', 'question', 'resolve-question']
+
+
+def register_parser(subparsers):
+    """Register questions, question, and resolve-question command parsers."""
+    # questions command (list)
+    p1 = subparsers.add_parser('questions', help='Show open questions (P10: acknowledged unknowns)')
+    p1.add_argument('-v', '--verbose', action='store_true', help='Show full details')
+    p1.add_argument('--full', action='store_true', help='Show full content without truncation')
+    p1.add_argument('--format', '-f', choices=['auto', 'table', 'list', 'json'],
+                    help='Output format (overrides config)')
+
+    # question command (add)
+    p2 = subparsers.add_parser('question', help='Raise an open question (P10: holding ambiguity)')
+    p2.add_argument('content', help='The question')
+    p2.add_argument('--context', '-c', help='Why this question matters')
+    p2.add_argument('--domain', '-d', help='Related expertise domain')
+    p2.add_argument('--batch', '-b', action='store_true',
+                    help='Queue for review (AI-safe)')
+
+    # resolve-question command
+    p3 = subparsers.add_parser('resolve-question', help='Resolve an open question (P10)')
+    p3.add_argument('question_id', help='Question ID (or prefix)')
+    p3.add_argument('resolution', help='The answer or conclusion')
+    p3.add_argument('--outcome', default='answered',
+                    choices=['answered', 'dissolved', 'superseded'],
+                    help='How it was resolved (default: answered)')
+
+    return p1, p2, p3
+
+
+def handle(cli, args):
+    """Handle questions, question, or resolve-question command dispatch."""
+    if args.command == 'questions':
+        cli._questions_cmd.questions_cmd(
+            verbose=args.verbose,
+            full=args.full,
+            output_format=getattr(args, 'format', None)
+        )
+    elif args.command == 'question':
+        cli._questions_cmd.question(
+            args.content,
+            context=args.context,
+            domain=args.domain,
+            batch_mode=getattr(args, 'batch', False)
+        )
+    elif args.command == 'resolve-question':
+        cli._questions_cmd.resolve_question(
+            args.question_id,
+            args.resolution,
+            outcome=args.outcome
+        )

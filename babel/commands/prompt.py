@@ -14,12 +14,13 @@ The system prompt is REQUIRED for LLMs to correctly use Babel:
 """
 
 from pathlib import Path
-from typing import Tuple
+from typing import Tuple, Optional
 
 from ..commands.base import BaseCommand
 from ..services.ide import detect_ide, get_ide_info, get_prompt_path, install_prompt, IDEType
 from ..content import BABEL_LLM_INSTRUCTIONS
 from ..presentation.symbols import safe_print
+from ..config import get_env_variable
 
 
 class PromptCommand(BaseCommand):
@@ -51,6 +52,40 @@ class PromptCommand(BaseCommand):
             return prompt_path.read_text(encoding='utf-8')
         return BABEL_LLM_INSTRUCTIONS
 
+    def _get_mini_prompt_path(self) -> Path:
+        """Get path to system_prompt_mini.md source file."""
+        return Path(__file__).parent.parent / "prompts" / "system_prompt_mini.md"
+
+    def _get_mini_prompt_content(self) -> str:
+        """
+        Get mini system prompt content.
+
+        Mini prompt is used when skills are installed (P6: Token Efficiency).
+        Falls back to full prompt if mini not found.
+        """
+        mini_path = self._get_mini_prompt_path()
+        if mini_path.exists():
+            return mini_path.read_text(encoding='utf-8')
+        # Fallback to full prompt if mini doesn't exist
+        return self._get_prompt_content()
+
+    def _should_use_mini(self) -> Tuple[bool, str]:
+        """
+        Check if mini prompt should be used based on skills installation.
+
+        Reads BABEL_SKILLS_INSTALLED from project .env file.
+
+        Returns:
+            Tuple of (use_mini: bool, reason: str)
+        """
+        skills_installed = get_env_variable(self.project_dir, "BABEL_SKILLS_INSTALLED")
+
+        if skills_installed and skills_installed.lower() == "true":
+            target = get_env_variable(self.project_dir, "BABEL_SKILLS_TARGET") or "unknown"
+            return True, f"Skills installed for {target}"
+        else:
+            return False, "Skills not installed (BABEL_SKILLS_INSTALLED != true)"
+
     def _detect_ide(self) -> Tuple[IDEType, str, Path]:
         """
         Detect IDE and return type, name, and prompt path.
@@ -81,7 +116,7 @@ class PromptCommand(BaseCommand):
         """
         safe_print(self._get_prompt_content())
 
-    def install(self, force: bool = False):
+    def install(self, force: bool = False, mode: str = "full"):
         """
         Install system prompt to IDE-specific location.
 
@@ -90,10 +125,28 @@ class PromptCommand(BaseCommand):
 
         Args:
             force: Overwrite existing prompt file if True
+            mode: "full" | "mini" | "auto"
+                  - full: Install complete system prompt (default)
+                  - mini: Install lightweight prompt (when skills installed)
+                  - auto: Check BABEL_SKILLS_INSTALLED to decide
         """
         symbols = self.symbols
         ide_type, ide_name, target_path = self._detect_ide()
-        prompt_content = self._get_prompt_content()
+
+        # Determine prompt mode and content
+        if mode == "auto":
+            use_mini, reason = self._should_use_mini()
+            print(f"Auto-detect: {reason}")
+            mode = "mini" if use_mini else "full"
+
+        if mode == "mini":
+            prompt_content = self._get_mini_prompt_content()
+            source_path = self._get_mini_prompt_path()
+            mode_label = "mini"
+        else:
+            prompt_content = self._get_prompt_content()
+            source_path = self._get_system_prompt_path()
+            mode_label = "full"
 
         # Check if target exists
         if target_path.exists() and not force:
@@ -111,13 +164,12 @@ class PromptCommand(BaseCommand):
 
         if success:
             print(f"{symbols.check_pass} {message}")
-            print(f"\n{ide_name} will now use Babel's system prompt.")
+            print(f"\n{ide_name} will now use Babel's {mode_label} system prompt.")
 
             # Show prompt source info
-            source_path = self._get_system_prompt_path()
             if source_path.exists():
                 line_count = len(prompt_content.splitlines())
-                print(f"\nSource: {source_path.name} ({line_count} lines)")
+                print(f"\nSource: {source_path.name} ({line_count} lines, {mode_label})")
             else:
                 print(f"\nSource: embedded fallback")
         else:
@@ -131,11 +183,13 @@ class PromptCommand(BaseCommand):
         - Detected IDE
         - Expected prompt location
         - Installation status
-        - Source file status
+        - Skills installation status
+        - Recommendations
         """
         symbols = self.symbols
         ide_type, ide_name, target_path = self._detect_ide()
         source_path = self._get_system_prompt_path()
+        mini_path = self._get_mini_prompt_path()
 
         print(f"\nSystem Prompt Status")
         print(f"{'=' * 40}")
@@ -145,13 +199,30 @@ class PromptCommand(BaseCommand):
         print(f"Prompt path:  {target_path}")
 
         # Installation status
+        installed_mode = None
         if target_path.exists():
             installed_content = target_path.read_text(encoding='utf-8')
             installed_lines = len(installed_content.splitlines())
-            print(f"Status:       {symbols.check_pass} Installed ({installed_lines} lines)")
 
-            # Check if up-to-date
-            current_content = self._get_prompt_content()
+            # Detect if mini or full based on line count
+            mini_lines = len(self._get_mini_prompt_content().splitlines())
+            full_lines = len(self._get_prompt_content().splitlines())
+
+            if abs(installed_lines - mini_lines) < 50:
+                installed_mode = "mini"
+            elif abs(installed_lines - full_lines) < 50:
+                installed_mode = "full"
+            else:
+                installed_mode = "custom"
+
+            print(f"Status:       {symbols.check_pass} Installed ({installed_lines} lines, {installed_mode})")
+
+            # Check if up-to-date against appropriate source
+            if installed_mode == "mini":
+                current_content = self._get_mini_prompt_content()
+            else:
+                current_content = self._get_prompt_content()
+
             if installed_content.strip() == current_content.strip():
                 print(f"Version:      {symbols.check_pass} Up to date")
             else:
@@ -159,21 +230,75 @@ class PromptCommand(BaseCommand):
         else:
             print(f"Status:       {symbols.check_fail} Not installed")
 
-        # Source status
-        print(f"\nSource File")
+        # Skills installation status
+        print(f"\nSkills Status")
         print(f"{'-' * 40}")
-        if source_path.exists():
-            source_lines = len(self._get_prompt_content().splitlines())
-            print(f"Path:         {source_path}")
-            print(f"Size:         {source_lines} lines")
+        use_mini, reason = self._should_use_mini()
+        skills_target = get_env_variable(self.project_dir, "BABEL_SKILLS_TARGET") or "none"
+        if use_mini:
+            print(f"Skills:       {symbols.check_pass} Installed ({skills_target})")
+            print(f"Recommended:  mini prompt (--mini or --auto)")
         else:
-            print(f"Path:         (embedded fallback)")
+            print(f"Skills:       {symbols.check_fail} Not installed")
+            print(f"Recommended:  full prompt (default)")
+
+        # Source files
+        print(f"\nSource Files")
+        print(f"{'-' * 40}")
+        full_lines = len(self._get_prompt_content().splitlines())
+        mini_lines = len(self._get_mini_prompt_content().splitlines())
+        print(f"Full:         {source_path.name} ({full_lines} lines)")
+        print(f"Mini:         {mini_path.name} ({mini_lines} lines)")
 
         # Actions
         print(f"\nActions")
         print(f"{'-' * 40}")
         if not target_path.exists():
-            print(f"Install:      babel prompt --install")
+            print(f"Install full: babel prompt --install")
+            print(f"Install mini: babel prompt --install --mini")
+            print(f"Auto-detect:  babel prompt --install --auto")
         else:
-            print(f"Update:       babel prompt --install --force")
+            print(f"Update full:  babel prompt --install --force")
+            print(f"Update mini:  babel prompt --install --mini --force")
+            print(f"Auto-detect:  babel prompt --install --auto --force")
         print(f"View:         babel prompt")
+
+
+# =============================================================================
+# Command Registration (Self-Registration Pattern)
+# =============================================================================
+
+COMMAND_NAME = 'prompt'
+
+
+def register_parser(subparsers):
+    """Register prompt command parser."""
+    p = subparsers.add_parser('prompt', help='Manage system prompt for LLM integration')
+    p.add_argument('--install', action='store_true',
+                   help='Install prompt to IDE-specific location (default: full)')
+    p.add_argument('--mini', action='store_true',
+                   help='With --install: use lightweight prompt (when skills installed)')
+    p.add_argument('--auto', action='store_true',
+                   help='With --install: auto-select based on BABEL_SKILLS_INSTALLED')
+    p.add_argument('--force', action='store_true',
+                   help='Overwrite existing prompt file')
+    p.add_argument('--status', action='store_true',
+                   help='Show installation status and recommendations')
+    return p
+
+
+def handle(cli, args):
+    """Handle prompt command dispatch."""
+    if args.status:
+        cli._prompt_cmd.status()
+    elif args.install:
+        # Determine mode: auto > mini > full
+        if args.auto:
+            mode = "auto"
+        elif args.mini:
+            mode = "mini"
+        else:
+            mode = "full"
+        cli._prompt_cmd.install(force=args.force, mode=mode)
+    else:
+        cli._prompt_cmd.show()

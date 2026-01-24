@@ -40,27 +40,26 @@ class CaptureCommand(BaseCommand):
         """
         existing = []
 
-        # Get confirmed artifacts from events
-        for event in self.events.read_all():
-            if event.type == EventType.ARTIFACT_CONFIRMED:
-                data = event.data
-                artifact_type = data.get('artifact_type', 'unknown')
+        # Get confirmed artifacts using type-indexed cache (O(1) vs O(n))
+        for event in self.events.read_by_type(EventType.ARTIFACT_CONFIRMED):
+            data = event.data
+            artifact_type = data.get('artifact_type', 'unknown')
 
-                # Extract summary from content
-                content = data.get('content', {})
-                if isinstance(content, dict):
-                    summary = content.get('summary', '')
-                elif isinstance(content, str):
-                    summary = content[:100]
-                else:
-                    summary = str(content)[:100]
+            # Extract summary from content
+            content = data.get('content', {})
+            if isinstance(content, dict):
+                summary = content.get('summary', '')
+            elif isinstance(content, str):
+                summary = content[:100]
+            else:
+                summary = str(content)[:100]
 
-                if summary:
-                    existing.append(ExistingArtifact(
-                        artifact_type=artifact_type,
-                        summary=summary,
-                        artifact_id=event.id
-                    ))
+            if summary:
+                existing.append(ExistingArtifact(
+                    artifact_type=artifact_type,
+                    summary=summary,
+                    artifact_id=event.id
+                ))
 
         return existing
 
@@ -152,7 +151,7 @@ class CaptureCommand(BaseCommand):
                 print(f"  (Borrowing from: {', '.join(cross_domain.external_domains)})")
 
         if not share:
-            print(f"  Share with: babel share {event.id[:8]}")
+            print(f"  Share with: babel share {self._cli.codec.encode(event.id)}")
 
         if auto_extract:
             if not self.extractor.is_available:
@@ -351,7 +350,7 @@ class CaptureCommand(BaseCommand):
         # Index for retrieval
         self.refs.index_event(event, self.vocabulary)
 
-        print(f"Specification added to [{resolved_id[:8]}] ({symbols.shared} shared).")
+        print(f"Specification added to {self._cli.format_id(resolved_id)} ({symbols.shared} shared).")
         print(f"  OBJECTIVE: {spec_data.get('objective', 'N/A')[:80]}...")
 
         # Show parsed structure
@@ -372,16 +371,12 @@ class CaptureCommand(BaseCommand):
 
     def _resolve_need_id(self, need_id: str) -> Optional[str]:
         """
-        Resolve need_id to full ID (supports prefix matching).
+        Resolve need_id to full ID (supports codec alias and prefix matching).
 
-        Searches for artifacts that could be "needs" (conversations, purposes, decisions).
+        Uses centralized resolve_id() for consistent ID resolution across all commands.
         """
-        # Try exact match first
-        for event in self.events.read_all():
-            if event.id == need_id or event.id.startswith(need_id):
-                return event.id
-
-        return None
+        candidate_ids = [event.id for event in self.events.read_all()]
+        return self._cli.resolve_id(need_id, candidate_ids, "need")
 
     def _parse_spec_text(self, text: str) -> Dict[str, any]:
         """
@@ -479,3 +474,48 @@ class CaptureCommand(BaseCommand):
                     result[key] = items if items else None
 
         return result
+
+
+# =============================================================================
+# Command Registration (Self-Registration Pattern)
+# =============================================================================
+
+def register_parser(subparsers):
+    """Register capture command parser."""
+    p = subparsers.add_parser('capture', help='Capture a thought or decision')
+    p.add_argument('text', help='What to capture')
+    p.add_argument('--raw', action='store_true', help='Skip extraction')
+    p.add_argument('--share', '-s', action='store_true',
+                   help='Share with team (default: local only)')
+    p.add_argument('--domain', '-d',
+                   help='Expertise domain (P3: security, performance, architecture, etc.)')
+    p.add_argument('--uncertain', '-u', action='store_true',
+                   help='Mark as uncertain/provisional (P10: holding ambiguity)')
+    p.add_argument('--uncertainty-reason', help='Why this is uncertain')
+    p.add_argument('--batch', '-b', action='store_true',
+                   help='Queue proposals for later review (use: babel review)')
+    p.add_argument('--spec', metavar='NEED_ID',
+                   help='Add specification to existing need (text becomes spec content)')
+    return p
+
+
+def handle(cli, args):
+    """Handle capture command dispatch."""
+    if args.spec:
+        # Specification capture mode: enrich existing need with spec
+        cli._capture_cmd.capture_spec(
+            need_id=args.spec,
+            spec_text=args.text,
+            batch_mode=args.batch
+        )
+    else:
+        # Regular capture mode
+        cli._capture_cmd.capture(
+            args.text,
+            auto_extract=not args.raw,
+            share=args.share,
+            domain=args.domain,
+            uncertain=args.uncertain,
+            uncertainty_reason=args.uncertainty_reason,
+            batch_mode=args.batch
+        )

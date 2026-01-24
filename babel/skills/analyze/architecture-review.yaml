@@ -1,0 +1,41 @@
+name: architecture-review
+category: analyze
+description: Design pattern and structure analysis - evaluate architecture alignment with purpose and constraints
+trigger: Design review needed, "review architecture", "structure analysis", before major refactor
+
+commands:
+  - babel why "architecture"
+  - babel scan --type architecture
+  - babel scan --type architecture --deep
+
+principles:
+  - P3 (Expertise-Weighted)
+  - P7 (Reasoning Travels)
+
+uses_context:
+  - Project purpose
+  - Decisions grouped by domain
+  - Constraints
+  - Tech stack
+
+produces:
+  - Design pattern assessment
+  - Structural alignment findings
+  - Scalability evaluation
+  - Separation of concerns analysis
+  - Dependency direction review
+
+composable_with:
+  - recall
+  - challenge
+
+always_load: false
+load_on_demand: true
+user_invocable: true
+
+# Focus areas:
+# - Design pattern appropriateness for stated purpose
+# - Structural alignment with constraints
+# - Scalability given tech choices
+# - Separation of concerns
+# - Dependency direction

@@ -60,8 +60,16 @@ class CoherenceCommand(BaseCommand):
             print(f"\n{format_coherence_status(result, symbols, verbose=True, full=full)}")
 
         # Succession hint (centralized)
+        # When coherence passes, hint about capturing implementation decisions
         from ..output import end_command
-        end_command("coherence", {"has_issues": result.has_issues if result else False})
+        has_issues = result.has_issues if result else False
+        orphan_count = self.graph.stats().get('orphans', 0)
+        end_command("coherence", {
+            "has_issues": has_issues,
+            "has_drift": has_issues,  # Alias for succession rule
+            "has_orphans": orphan_count > 0,
+            "implementation_verified": not has_issues  # Hint capture when passes
+        })
 
     def _resolve_issues(self, result, full: bool = False, batch: bool = False):
         """
@@ -102,10 +110,10 @@ class CoherenceCommand(BaseCommand):
 
         for i, entity in enumerate(issues, 1):
             print(f"\nIssue {i} of {len(issues)}: {entity.status.upper()}")
-            print(f"  [{entity.id[:8]}] {entity.summary[:60]}...")
+            print(f"  {self._cli.format_id(entity.id)} {entity.summary[:60]}...")
 
             if entity.duplicate_of:
-                print(f"  Duplicate of: [{entity.duplicate_of[:8]}]")
+                print(f"  Duplicate of: {self._cli.format_id(entity.duplicate_of)}")
             if entity.reason:
                 print(f"  Reason: {entity.reason}")
 
@@ -178,27 +186,32 @@ class CoherenceCommand(BaseCommand):
         For AI operators who can't use interactive prompts.
         Shows analysis and commands, user executes manually.
 
+        Uses orchestrator for parallel LLM calls when enabled.
         HC2 preserved: AI proposes, human executes.
         """
         symbols = self.symbols
 
         print(f"\n{symbols.tension} Found {len(issues)} issue(s) to resolve.")
+
+        # Try parallel execution if orchestrator is available and enabled
+        suggestions = self._get_suggestions_parallel(issues)
+
         print("Batch mode: Showing AI suggestions (no interaction).\n")
         print("=" * 60)
 
         commands_to_run = []
 
         for i, entity in enumerate(issues, 1):
-            print(f"\n[{i}/{len(issues)}] {entity.status.upper()}: [{entity.id[:8]}]")
+            print(f"\n[{i}/{len(issues)}] {entity.status.upper()}: {self._cli.format_id(entity.id)}")
             print(f"  {entity.summary[:80]}...")
 
             if entity.duplicate_of:
-                print(f"  Duplicate of: [{entity.duplicate_of[:8]}]")
+                print(f"  Duplicate of: {self._cli.format_id(entity.duplicate_of)}")
             if entity.reason:
                 print(f"  Reason: {entity.reason}")
 
-            # Get AI suggestion
-            suggestion = self.coherence.suggest_resolution(entity)
+            # Get AI suggestion from pre-fetched results
+            suggestion = suggestions.get(entity.id)
 
             if suggestion:
                 print(f"\n  AI Analysis ({suggestion.confidence:.0%} confidence):")
@@ -226,6 +239,56 @@ class CoherenceCommand(BaseCommand):
                 print(f"  {cmd}")
             print(f"\nReview and execute commands above to resolve issues.")
 
+    def _get_suggestions_parallel(self, issues):
+        """
+        Get AI suggestions for all issues, using parallel execution if available.
+
+        Falls back to sequential execution if orchestrator is disabled or unavailable.
+
+        Returns:
+            Dict mapping entity.id -> ResolutionSuggestion (or None)
+        """
+        suggestions = {}
+
+        # Check if orchestrator is available and enabled
+        orchestrator = self.orchestrator
+        if orchestrator and orchestrator.enabled and len(issues) > 1:
+            # Use parallel execution for multiple issues
+            from ..orchestrator import io_task, Priority
+
+            print(f"  (Parallelizing {len(issues)} LLM calls...)")
+
+            # Submit all suggestion requests as I/O tasks (LLM calls)
+            futures = []
+            for entity in issues:
+                task = io_task(
+                    fn=self.coherence.suggest_resolution,
+                    args=(entity,),
+                    priority=Priority.HIGH,
+                    name=f"suggest_{self._cli.codec.encode(entity.id)}",
+                    timeout=30.0,
+                    is_llm_call=True  # Rate limit applies to LLM calls
+                )
+                future = orchestrator.submit(task)
+                futures.append((entity.id, future))
+
+            # Collect results
+            for entity_id, future in futures:
+                try:
+                    result = future.result(timeout=35.0)
+                    if result.success:
+                        suggestions[entity_id] = result.result
+                    else:
+                        suggestions[entity_id] = None
+                except Exception:
+                    suggestions[entity_id] = None
+        else:
+            # Sequential fallback
+            for entity in issues:
+                suggestions[entity.id] = self.coherence.suggest_resolution(entity)
+
+        return suggestions
+
     def _execute_resolution(self, entity, suggestion) -> bool:
         """Execute a resolution action with P8 lesson extraction."""
         symbols = self.symbols
@@ -250,16 +313,18 @@ class CoherenceCommand(BaseCommand):
 
         # Execute the deprecation/resolution
         if entity.status == "duplicate" and entity.duplicate_of:
-            reason = f"duplicate of {entity.duplicate_of[:8]}"
+            dup_alias = self._cli.codec.encode(entity.duplicate_of)
+            reason = f"duplicate of {dup_alias}"
             if lesson:
                 reason += f" - Lesson: {lesson}"
 
-            print(f"\n  Executing: babel deprecate {entity.id[:8]} \"{reason}\"")
+            alias = self._cli.codec.encode(entity.id)
+            print(f"\n  Executing: babel deprecate {alias} \"{reason}\"")
 
             # Actually deprecate
             try:
                 self._cli.deprecate(
-                    artifact_id=entity.id[:8],
+                    artifact_id=alias,
                     reason=reason
                 )
             except Exception as e:
@@ -272,10 +337,11 @@ class CoherenceCommand(BaseCommand):
             print("    2. Deprecate (babel deprecate)")
             action = input("    Action [1/2]: ").strip()
 
+            alias = self._cli.codec.encode(entity.id)
             if action == "1":
-                print(f"  Executing: babel link {entity.id[:8]}")
+                print(f"  Executing: babel link {alias}")
                 try:
-                    self._cli.link(entity.id[:8])
+                    self._cli.link(alias)
                 except Exception as e:
                     print(f"  Error: {e}")
                     return False
@@ -283,10 +349,10 @@ class CoherenceCommand(BaseCommand):
                 reason = "no longer relevant"
                 if lesson:
                     reason += f" - Lesson: {lesson}"
-                print(f"  Executing: babel deprecate {entity.id[:8]} \"{reason}\"")
+                print(f"  Executing: babel deprecate {alias} \"{reason}\"")
                 try:
                     self._cli.deprecate(
-                        artifact_id=entity.id[:8],
+                        artifact_id=alias,
                         reason=reason
                     )
                 except Exception as e:
@@ -320,7 +386,7 @@ class CoherenceCommand(BaseCommand):
         if context:
             try:
                 self._cli.question(
-                    content=f"Coherence issue [{entity.id[:8]}]: {entity.summary[:50]}... - {context}"
+                    content=f"Coherence issue {self._cli.format_id(entity.id)}: {entity.summary[:50]}... - {context}"
                 )
                 print(f"  {symbols.check_pass} Marked as open question.")
             except Exception as e:
@@ -391,3 +457,54 @@ class CoherenceCommand(BaseCommand):
         except Exception as e:
             print(f"Scan failed: {e}")
             print("Check LLM configuration with `babel config`")
+
+
+# =============================================================================
+# Command Registration (Self-Registration Pattern)
+# =============================================================================
+
+# Multiple commands registered by this module
+COMMAND_NAMES = ['coherence', 'scan']
+
+
+def register_parser(subparsers):
+    """Register coherence and scan command parsers."""
+    # coherence command
+    p1 = subparsers.add_parser('coherence', help='Check project coherence')
+    p1.add_argument('--force', action='store_true', help='Force full check (ignore cache)')
+    p1.add_argument('--full', action='store_true', help='Show full content without truncation')
+    p1.add_argument('--qa', action='store_true', help='QA/QC mode with detailed report')
+    p1.add_argument('--resolve', action='store_true',
+                    help='Interactive resolution mode for issues (Living Cycle re-negotiation)')
+    p1.add_argument('--batch', action='store_true',
+                    help='Non-interactive mode with --resolve (for AI operators)')
+
+    # scan command
+    p2 = subparsers.add_parser('scan', help='Context-aware technical scan')
+    p2.add_argument('query', nargs='?', default=None, help='Specific question to answer')
+    p2.add_argument('--type', dest='scan_type', default='health',
+                    choices=['health', 'architecture', 'security', 'performance', 'dependencies'],
+                    help='Type of scan (default: health)')
+    p2.add_argument('--deep', action='store_true', help='Run comprehensive analysis')
+    p2.add_argument('-v', '--verbose', action='store_true', help='Show all findings')
+
+    return p1, p2
+
+
+def handle(cli, args):
+    """Handle coherence or scan command dispatch."""
+    if args.command == 'coherence':
+        cli._coherence_cmd.coherence_check(
+            force=args.force,
+            full=args.full,
+            qa=args.qa,
+            resolve=args.resolve,
+            batch=args.batch
+        )
+    elif args.command == 'scan':
+        cli._coherence_cmd.scan(
+            scan_type=args.scan_type,
+            deep=args.deep,
+            query=args.query,
+            verbose=args.verbose
+        )

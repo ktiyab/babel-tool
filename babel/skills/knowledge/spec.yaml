@@ -1,0 +1,169 @@
+name: spec
+category: knowledge
+description: Capture implementation specification. Preserves HOW we intend to implement alongside WHY. Includes scope boundaries, test requirements, and verification criteria. Must follow remember skill.
+
+trigger: Implementation plan ready for a captured decision, user validates specifications before coding, before coding starts (after need captured), resuming task where spec wasn't yet captured
+
+commands:
+  - 'babel capture --spec <capture_id> "OBJECTIVE:... ADD:... MODIFY:... REMOVE:... PRESERVE:... RELATED:... TEST:... NOTE:..." --batch'
+
+principles:
+  - P7 (Reasoning Travels) - HOW must be captured, not just WHAT/WHY
+  - P8 (Evolution Traceable) - Spec linked to parent decision
+  - HC2 (Human Authority) - Specs presented for validation before implementation
+
+uses_context:
+  - Parent capture ID (the need/decision being specified)
+  - Related files that inform the change
+  - Existing patterns in codebase
+
+produces:
+  - Specification linked to parent capture (queued)
+  - Implementation roadmap with scope boundaries
+  - Test requirements
+  - Verification checklist for post-implementation
+
+composable_with:
+  - remember (BEFORE - capture the need/decision)
+  - start-new (spec is part of new task workflow)
+  - continue (spec may need capture when resuming)
+  - validate (user reviews spec)
+
+always_load: false
+load_on_demand: true
+user_invocable: true
+
+examples:
+  - |
+    ## Specification Skill — Capture Implementation Details
+
+    Preserves HOW we intend to implement alongside WHY.
+    **Must follow /remember skill** — specs link to parent decisions.
+
+  - |
+    ### Why Specs Matter
+
+    | Without Spec | With Spec |
+    |--------------|-----------|
+    | Implementation plan evaporates when context compresses | Plan persists in graph |
+    | "How did I intend to do this?" | Query via `babel why` |
+    | Scope creep during implementation | Scope boundaries documented |
+    | No test plan | TEST requirements captured |
+
+    - Need answers "WHY do we want this?"
+    - Spec answers "HOW do we intend to achieve it?"
+
+  - |
+    ### Implements
+
+    This skill implements the **Code Modification Protocol** (Pre-Flight Checklist).
+    See `/code-mod` protocol for full workflow including post-implementation verification.
+
+  - |
+    ### Specification Format (COMPLETE)
+
+    ```
+    OBJECTIVE: Restate the intent — what problem this solves
+    ADD:       What must be introduced to correctly fulfill intent
+    MODIFY:    What existing code must change to align with intent
+    REMOVE:    What to eliminate — prevents regression, dead code, bugs
+    PRESERVE:  What must NOT be touched
+    RELATED:   Files/dependencies that INFORM this change
+    TEST:      What tests must be created to validate functionality
+    NOTE:      Implementation notes, edge cases, caveats
+    ```
+
+  - |
+    ### Scope Discipline
+
+    ```
+    IN SCOPE:  Only what serves the current resolution
+    OUT:       Any unrelated engineering — DO NOT
+    ```
+
+    Avoid over-engineering. Only make changes directly requested or clearly necessary.
+
+  - |
+    ### Complete Sequence
+
+    ```
+    1. /remember → babel capture "WHAT + WHY" --batch
+    2. /spec    → babel capture --spec <id> "..." --batch (this skill)
+    3. WAIT     → Present spec to user for review
+    4. /validate → User: babel review --accept <id>
+    5. IMPLEMENT → Write code
+    6. VERIFY   → Check against spec (see /code-mod)
+    ```
+
+  - |
+    ### Full Example
+
+    ```bash
+    babel capture --spec abc12345 "OBJECTIVE: Add caching to reduce API calls
+
+    ADD:
+    - Redis client initialization in config.py
+    - cache_response decorator in utils/cache.py
+    - TTL configuration in settings
+
+    MODIFY:
+    - api/endpoints.py to use decorator
+    - requirements.txt to add redis
+
+    REMOVE:
+    - None
+
+    PRESERVE:
+    - Existing rate limiting logic
+    - Error handling patterns
+
+    RELATED:
+    - config.py (initialization patterns)
+    - api/endpoints.py (current structure)
+
+    TEST:
+    - Cache hit returns stored value
+    - Cache miss calls API and stores
+    - TTL expiration works correctly
+
+    NOTE:
+    - Redis connection pooling needed for production
+    - Consider fallback if Redis unavailable" --batch
+    ```
+
+  - |
+    ### WAIT Behavior (After Spec Capture)
+
+    After capturing spec, present to user:
+
+    ```
+    "Specification captured for [parent decision]. Please review:
+     - Scope: [summary]
+     - Files affected: [list]
+     - Tests planned: [list]
+
+     Review with: `babel review`"
+    ```
+
+    **Do NOT implement before user reviews spec.**
+
+  - |
+    ### Post-Implementation Verification
+
+    After implementing, verify against spec (see `/code-mod` protocol):
+
+    - [ ] Changes respect the stated intent (not just technically work)?
+    - [ ] Removals traced — no regressions, no orphaned code?
+    - [ ] Related files considered and updated accordingly?
+    - [ ] Tests created as specified?
+
+  - |
+    ### Common Mistakes
+
+    | Mistake | Why It's Wrong | Fix |
+    |---------|----------------|-----|
+    | Skip spec capture | Implementation plan evaporates | Always capture --spec |
+    | Implement before WAIT | Violates HC2 (Human Authority) | Present spec first |
+    | Omit TEST section | No validation criteria | Always include tests |
+    | Skip RELATED files | Miss dependencies | List all informing files |
+    | Scope creep during impl | Beyond original intent | Check spec boundaries |

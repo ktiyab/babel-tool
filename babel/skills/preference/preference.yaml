@@ -1,0 +1,210 @@
+name: preference
+category: preference
+description: Save persistent user preferences. Reduce repetition by saving instructions that persist across sessions. Context-aware surfacing ensures relevance without pollution. Unlike decisions (HC1 immutable), memos can be updated/removed.
+
+trigger: User repeats operational instructions (2+ times), explicit preference stated ("I always want...", "Never do..."), AI detects repeated patterns across sessions, user corrects AI repeatedly on same topic
+
+commands:
+  # Create memos
+  - 'babel memo "instruction"'
+  - 'babel memo "instruction" --context <ctx>'
+  # Manage memos
+  - babel memo --list
+  - 'babel memo --update <id> "new content"'
+  - babel memo --remove <id>
+  # AI detection features
+  - babel memo --candidates
+  - babel memo --promote <id>
+  - babel memo --dismiss <id>
+
+principles:
+  - P7 (Reasoning Travels) - Preferences persist across sessions
+  - HC2 (Human Authority) - User decides what to save
+
+uses_context:
+  - Repeated user instructions
+  - Context for when preference applies (via --context flag)
+  - Threshold for candidate promotion
+  - Existing memos (to avoid duplicates)
+
+produces:
+  - Saved memo (persists across sessions)
+  - Context-aware preference surfacing
+  - AI-detected pattern candidates
+
+composable_with:
+  - init-memo (for foundational instructions)
+  - orient (memos inform session context)
+
+always_load: false
+load_on_demand: true
+user_invocable: true
+
+examples:
+  - |
+    ## FLOW 11: PREFERENCE — Save Persistent User Preferences
+
+    Reduce repetition by saving instructions that persist across sessions.
+
+    **Why Preferences Matter:**
+    - Reduces repetition — user says it once, persists across sessions
+    - Context-aware — regular memos surface only when relevant
+    - Mutable — unlike decisions (HC1), memos can be updated/removed
+    - AI detection — system can suggest patterns for promotion
+
+  - |
+    ### Key Difference from Decisions
+
+    | Aspect | Decisions | Memos |
+    |--------|-----------|-------|
+    | Mutability | HC1 immutable | Can update/remove |
+    | Purpose | Project decisions | Operational preferences |
+    | Scope | Project-wide reasoning | User workflow preferences |
+
+    **Rule:** Decisions capture WHY. Memos capture HOW user wants to work.
+
+  - |
+    ### Detection Triggers
+
+    When YOU should suggest saving a preference:
+
+    | Pattern | Example | Response |
+    |---------|---------|----------|
+    | User corrects AI 2+ times | "No, use X not Y" (again) | Suggest memo |
+    | Explicit preference | "I always want...", "Never do..." | Suggest memo |
+    | Repeated across sessions | Same instruction in multiple sessions | Suggest memo |
+    | Critical rule stated | "Non-negotiable: ..." | Suggest `--init` |
+
+  - |
+    ### Command Reference
+
+    ```bash
+    # CREATE memos
+    babel memo "instruction"                    # Regular memo
+    babel memo "instruction" --context <ctx>    # With context tag
+
+    # MANAGE memos
+    babel memo --list                           # Show all memos
+    babel memo --update <id> "new content"      # Update memo
+    babel memo --remove <id>                    # Delete memo
+
+    # AI DETECTION features
+    babel memo --candidates                     # Show AI-detected patterns
+    babel memo --promote <id>                   # Candidate → memo
+    babel memo --dismiss <id>                   # Don't suggest again
+    ```
+
+  - |
+    ### Context-Aware Surfacing
+
+    ```bash
+    # Memo with context only surfaces when that context is active
+    babel memo "Use pytest fixtures" --context testing
+    # → Only surfaces when working on tests
+
+    # Memo without context surfaces based on keyword matching
+    babel memo "Always use type hints"
+    # → Surfaces when Python code is being written
+    ```
+
+    **This prevents context pollution** — preferences appear only when relevant.
+
+  - |
+    ### When to Use Init vs Regular
+
+    | Situation | Use | Command |
+    |-----------|-----|---------|
+    | Critical rule for ALL contexts | init-memo | `babel memo "..." --init` |
+    | Preference for specific context | regular | `babel memo "..." --context X` |
+    | General preference | regular | `babel memo "..."` |
+
+    See `/init-memo` skill for foundational instructions.
+
+  - |
+    ### Example Workflow
+
+    ```bash
+    # User says: "Use python3 not python" (again)
+    # You detect this is repeated
+
+    # Option 1: Regular memo with context
+    babel memo "Always use python3 not python" --context bash
+
+    # Option 2: Init memo (if it's a critical rule)
+    babel memo "Always use python3 not python" --init
+
+    # Option 3: Register as candidate (silent tracking)
+    # Internal — suggests when threshold reached
+    ```
+
+  - |
+    ### AI Detection Features
+
+    ```bash
+    # View patterns AI has detected
+    babel memo --candidates
+    # → c_abc123: "use python3" (seen 3 times)
+    # → c_def456: "prefer functional style" (seen 2 times)
+
+    # Confirm a candidate → becomes memo
+    babel memo --promote c_abc123
+    # → Now persists as regular memo
+
+    # Dismiss — don't suggest again
+    babel memo --dismiss c_def456
+    # → Pattern ignored
+    ```
+
+  - |
+    ### Managing Memos
+
+    ```bash
+    # List all saved preferences
+    babel memo --list
+    # → [m_abc123] Always use python3 not python (context: bash)
+    # → [m_def456] Use pytest fixtures (context: testing)
+
+    # Update a memo
+    babel memo --update m_abc123 "Use python3.11 specifically"
+
+    # Remove a memo
+    babel memo --remove m_def456
+    ```
+
+  - |
+    ### Non-Interactive (AI-Safe)
+
+    All memo commands are non-interactive — safe for AI operators:
+
+    ```bash
+    babel memo "instruction"              # Add regular (no prompt)
+    babel memo "instruction" --init       # Add init (no prompt)
+    babel memo --promote c_abc123         # Promote candidate (no prompt)
+    babel memo --list                     # List all (no prompt)
+    babel memo --update m_abc123 "new"    # Update (no prompt)
+    babel memo --remove m_abc123          # Remove (no prompt)
+    ```
+
+    **No interactive prompts that would cause EOF errors.**
+
+  - |
+    ### Preference Lifecycle
+
+    ```
+    PREFERENCE CYCLE:
+      [detect repeat] → memo "..." OR memo --candidate → [threshold] → memo --promote
+      [foundational rule] → memo "..." --init → [surfaces in status]
+      [promote to init] → memo --promote-init <id> → [now foundational]
+    ```
+
+  - |
+    ### Consequence of Skipping
+
+    | Skip | Result |
+    |------|--------|
+    | Don't save repeated preference | User repeats themselves, frustration grows |
+    | Use init for context-specific | Pollution — rule surfaces when not relevant |
+    | Use regular for critical rule | May not surface at session start |
+
+    **Rule:** Save preferences proactively. Repetition = signal to persist.
+

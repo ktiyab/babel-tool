@@ -21,7 +21,7 @@ Usage:
     babel hooks install
 """
 
-__version__ = "0.1.0.20260121"
+__version__ = "0.2.0.20260124"
 
 # Core layer (data)
 from .core.events import EventStore, DualEventStore, Event, EventType

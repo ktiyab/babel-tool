@@ -24,18 +24,6 @@ from ..utils.pagination import Paginator, DEFAULT_LIMIT
 ARTIFACT_TYPES = ['decision', 'constraint', 'principle', 'purpose', 'tension']
 
 
-def _short_id(full_id: str) -> str:
-    """
-    Extract short display ID from full node ID.
-
-    Node IDs are formatted as 'type_hash' (e.g., 'constraint_8e039da3').
-    This extracts the hash part for display.
-    """
-    if '_' in full_id:
-        return full_id.split('_', 1)[1][:8]
-    return full_id[:8]
-
-
 def _get_summary(node: Node) -> str:
     """Extract human-readable summary from node content."""
     content = node.content
@@ -99,17 +87,17 @@ class ListCommand(BaseCommand):
         for artifact_type, count in sorted(type_counts.items(), key=lambda x: -x[1]):
             print(f"  {artifact_type}s: {count:>4}  {symbols.arrow} babel list {artifact_type}s")
 
-        # Show orphan count
-        orphans = self.graph.find_orphans()
-        if orphans:
-            print(f"\n  orphans: {len(orphans):>4}  {symbols.arrow} babel list --orphans")
+        # Show orphan count (O(1) lookup)
+        orphan_count = self.graph.count_orphans()
+        if orphan_count > 0:
+            print(f"\n  orphans: {orphan_count:>4}  {symbols.arrow} babel list --orphans")
 
         print()
         print(f"Graph traversal: babel list --from <id>")
 
         # Succession hint
         from ..output import end_command
-        end_command("list", {"has_orphans": len(orphans) > 0})
+        end_command("list", {"has_orphans": orphan_count > 0})
 
     def list_by_type(
         self,
@@ -168,11 +156,11 @@ class ListCommand(BaseCommand):
             title = f"{title} matching '{filter_pattern}'"
         print(f"\n{paginator.header(title)}")
 
-        # Display artifacts (dual-display: ID + summary)
+        # Display artifacts (dual-display: ID alias + summary)
         for node in paginator.items():
-            short_id = _short_id(node.id)
+            formatted_id = self._cli.format_id(node.id)
             summary = truncate(_get_summary(node), SUMMARY_LENGTH - 15)
-            print(f"  [{short_id}] {summary}")
+            print(f"  {formatted_id} {summary}")
 
         # Navigation hints
         cmd_base = f"babel list {artifact_type}s"
@@ -205,8 +193,8 @@ class ListCommand(BaseCommand):
         """
         symbols = self.symbols
 
-        # Resolve ID using IDResolver
-        result = self.resolver.resolve(artifact_id)
+        # Resolve ID using IDResolver (supports short codes via codec)
+        result = self.resolver.resolve(artifact_id, codec=self.codec)
         if not result or not result.node:
             print(f"\nArtifact not found: {artifact_id}")
             print("Use full ID or unique prefix.")
@@ -214,10 +202,11 @@ class ListCommand(BaseCommand):
 
         node = result.node
 
-        # Display the starting artifact
-        short_id = _short_id(node.id)
+        # Display the starting artifact (using alias formatting)
+        formatted_id = self._cli.format_id(node.id)
+        alias_code = self._cli.codec.encode(node.id)  # For actionable hints
         summary = truncate(_get_summary(node), SUMMARY_LENGTH)
-        print(f"\n[{short_id}] {summary}")
+        print(f"\n{formatted_id} {summary}")
         print(f"  Type: {node.type}")
 
         # Get incoming edges (what points TO this artifact)
@@ -225,26 +214,26 @@ class ListCommand(BaseCommand):
         if incoming:
             print(f"\n  {symbols.arrow} Supported by ({len(incoming)}):")
             for edge, source_node in incoming:
-                src_id = _short_id(source_node.id)
+                src_formatted = self._cli.format_id(source_node.id)
                 src_summary = truncate(_get_summary(source_node), SUMMARY_LENGTH - 20)
-                print(f"    [{src_id}] ({edge.relation}) {src_summary}")
+                print(f"    {src_formatted} ({edge.relation}) {src_summary}")
 
         # Get outgoing edges (what this artifact points TO)
         outgoing = self.graph.get_outgoing(node.id)
         if outgoing:
             print(f"\n  {symbols.arrow} Informs ({len(outgoing)}):")
             for edge, target_node in outgoing:
-                tgt_id = _short_id(target_node.id)
+                tgt_formatted = self._cli.format_id(target_node.id)
                 tgt_summary = truncate(_get_summary(target_node), SUMMARY_LENGTH - 20)
-                print(f"    [{tgt_id}] ({edge.relation}) {tgt_summary}")
+                print(f"    {tgt_formatted} ({edge.relation}) {tgt_summary}")
 
         if not incoming and not outgoing:
             print(f"\n  No connections (orphan artifact)")
-            print(f"  {symbols.arrow} Link it: babel link {short_id}")
+            print(f"  {symbols.arrow} Link it: babel link {alias_code}")
 
         # Succession hint
         from ..output import end_command
-        end_command("list", {"from_id": short_id, "has_connections": bool(incoming or outgoing)})
+        end_command("list", {"from_id": alias_code, "has_connections": bool(incoming or outgoing)})
 
     def list_orphans(self, limit: int = DEFAULT_LIMIT, offset: int = 0, show_all: bool = False):
         """
@@ -287,9 +276,9 @@ class ListCommand(BaseCommand):
         for node_type, nodes in sorted(by_type.items()):
             print(f"  [{node_type}] ({len(nodes)})")
             for node in nodes:
-                short_id = _short_id(node.id)
+                formatted_id = self._cli.format_id(node.id)
                 summary = truncate(_get_summary(node), SUMMARY_LENGTH - 20)
-                print(f"    [{short_id}] {summary}")
+                print(f"    {formatted_id} {summary}")
 
         # Navigation hints
         cmd_base = "babel list --orphans"
@@ -311,3 +300,51 @@ class ListCommand(BaseCommand):
         # Succession hint
         from ..output import end_command
         end_command("list", {"orphans": True, "count": paginator.total})
+
+
+# =============================================================================
+# Command Registration (Self-Registration Pattern)
+# =============================================================================
+
+COMMAND_NAME = 'list'
+
+
+def register_parser(subparsers):
+    """Register list command parser."""
+    p = subparsers.add_parser('list', help='List and discover artifacts (graph-aware)')
+    p.add_argument('type', nargs='?',
+                   help='Artifact type to list (decisions, constraints, principles)')
+    p.add_argument('--from', dest='from_id',
+                   help='Show artifacts connected to this ID (graph traversal)')
+    p.add_argument('--orphans', action='store_true',
+                   help='Show artifacts with no connections')
+    p.add_argument('--all', action='store_true', help='Show all items (no limit)')
+    p.add_argument('--filter', dest='filter_pattern',
+                   help='Filter by keyword (case-insensitive)')
+    p.add_argument('--limit', type=int, default=10,
+                   help='Maximum items to show (default: 10)')
+    p.add_argument('--offset', type=int, default=0,
+                   help='Skip first N items (default: 0)')
+    return p
+
+
+def handle(cli, args):
+    """Handle list command dispatch."""
+    if args.from_id:
+        cli._list_cmd.list_from(args.from_id)
+    elif args.orphans:
+        cli._list_cmd.list_orphans(
+            limit=args.limit,
+            offset=args.offset,
+            show_all=getattr(args, 'all', False)
+        )
+    elif args.type:
+        cli._list_cmd.list_by_type(
+            artifact_type=args.type,
+            limit=args.limit,
+            offset=args.offset,
+            show_all=getattr(args, 'all', False),
+            filter_pattern=args.filter_pattern
+        )
+    else:
+        cli._list_cmd.list_overview()

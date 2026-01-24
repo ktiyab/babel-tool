@@ -103,8 +103,7 @@ class SummaryRenderer(BaseRenderer):
                     text = item.get("text", str(item))
                     item_id = item.get("id", "")
                     if item_id:
-                        short_id = item_id[:8]
-                        text = f"[{short_id}] {text}"
+                        text = f"{self.format_id(item_id)} {text}"
                 else:
                     text = str(item)
                 text = self.truncate(text, self.width - 4)

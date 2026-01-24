@@ -1,0 +1,153 @@
+name: recall
+category: knowledge
+description: Query existing knowledge before ANY code change. MANDATORY to check constraints before modifying. Also used to recover rules after context compression.
+
+trigger: Before ANY code modification (NON-NEGOTIABLE), user asks "why is it this way" or "what's the context for", after context compression to recover rules, when starting or continuing a task
+
+commands:
+  - 'babel why "topic"'
+  - 'babel why "related topic"'
+  - 'babel why "TASK X.Y specific topic"'
+
+principles:
+  - P3 (Expertise-Weighted) - Results reflect domain knowledge
+  - P7 (Reasoning Travels) - Decisions persist and inform
+
+uses_context:
+  - Current task/request topic
+  - Related areas that might have constraints
+  - Task identifier when continuing work (e.g., "TASK B.2")
+
+produces:
+  - Relevant decisions on topic
+  - Related constraints
+  - Historical reasoning
+  - Gap identification (if empty)
+
+composable_with:
+  - orient (session start → recall before action)
+  - remember (recall → informed capture)
+  - analyze (recall context → analysis)
+  - continue (recall task-specific context)
+
+always_load: true
+load_on_demand: false
+user_invocable: true
+
+examples:
+  - |
+    ## FLOW 2: RECALL — Query Existing Knowledge
+
+    **Rule #1: Babel FIRST.** Your training data knows NOTHING about THIS project.
+
+    This skill is **MANDATORY** before code changes — the query is cheap, contradicting invisible constraints is expensive.
+
+  - |
+    ### Command Reference
+
+    ```bash
+    # Primary topic query
+    babel why "topic"
+
+    # Check adjacent areas (always do multiple)
+    babel why "related topic"
+
+    # Task-focused context (for ongoing work)
+    babel why "TASK X.Y specific topic"
+    ```
+
+  - |
+    ### Does NOT Cover (See Other Skills)
+
+    | Command | Skill |
+    |---------|-------|
+    | `babel why --commit <sha>` | /git-babel |
+
+    For commit-level reasoning, use the `/git-babel` skill.
+
+  - |
+    ### Requires Protocol
+
+    This skill requires the **Verbatim Protocol** when reporting results:
+    - Quote exactly what Babel returned
+    - Never paraphrase or invent
+    - Distinguish Babel output from your interpretation
+
+  - |
+    ### Multi-Query Pattern
+
+    Always check topic AND related areas:
+
+    ```bash
+    babel why "caching"        # Primary topic
+    babel why "performance"    # Related area
+    babel why "storage"        # Adjacent constraint
+    # THEN proceed informed by all results
+    ```
+
+    **Broad queries waste tokens. Focused multi-queries find constraints.**
+
+  - |
+    ### Task-Specific Queries
+
+    When continuing ongoing work:
+
+    ```bash
+    babel why "TASK B.2 ConstraintStatus"  # Focused, not broad
+    babel why "TASK B.2 component layout"  # Adjacent aspect
+    ```
+
+    Use task identifiers for precision, not generic terms.
+
+  - |
+    ### Handling Results
+
+    **IF EMPTY:**
+    ```
+    "Babel has no captured decisions about X.
+     This is a gap — should we capture a decision now?"
+    ```
+    → Proceed fresh, but now you KNOW there's no context
+
+    **IF RESULTS (apply Verbatim Protocol):**
+    ```
+    FROM BABEL (verbatim):
+      "[a1b2c3d4] Using SQLite for offline storage because users need offline access"
+
+    MY INTERPRETATION (clearly labeled):
+      "This informs our approach — we must maintain offline capability."
+    ```
+    → You MUST consider existing constraints before proceeding
+
+  - |
+    ### Recovery Use Case
+
+    After context compression, recover rules:
+
+    ```bash
+    babel why "output format"   # Recover formatting rules
+    babel why "code style"      # Recover style constraints
+    babel why "architecture"    # Recover structural decisions
+    ```
+
+    This is how you restore context that compressed away.
+
+  - |
+    ### The Rule
+
+    | Pattern | Result |
+    |---------|--------|
+    | User asks for change → you immediately implement | **WRONG** — may break invisible constraints |
+    | User asks for change → babel why → implement informed | **RIGHT** — constraints respected |
+
+    The query is cheap. The mistake is expensive.
+
+  - |
+    ### Common Mistakes
+
+    | Mistake | Why It's Wrong | Fix |
+    |---------|----------------|-----|
+    | Skip `babel why` | May contradict prior decisions | Always query first |
+    | Single broad query | Misses related constraints | Multi-query pattern |
+    | Paraphrase results | Violates Verbatim Protocol | Quote exactly |
+    | Ignore empty results | Miss gap capture opportunity | Suggest capture |

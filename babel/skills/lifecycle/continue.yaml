@@ -1,0 +1,205 @@
+name: continue
+category: lifecycle
+description: Resume ongoing multi-step tasks. Use when user asks to continue, resume, or pick up previous work. Handles task state discovery via babel history, dependency checking, and spec capture continuation.
+trigger: User says "continue the [project]", "resume", "where did we leave off", "pick up where we left", "what's next on"
+
+# Platform export hints
+allowed_tools:
+  - Bash(babel:*)
+  - Read
+  - Grep
+
+commands:
+  # Phase 1: ORIENT (parallel)
+  - babel status
+  - babel tensions
+  - babel questions
+  # Phase 2: WORK STATE (sequential)
+  - babel review --list
+  - babel review --accept-all
+  - "babel history -n 30 | grep -E 'TASK|COMPLETE'"
+  # Phase 3: LOCATE NEXT TASK
+  - "babel list constraints --all | grep -i depends"
+  - 'babel why "TASK X.Y specific topic"'
+  # Phase 4: IMPLEMENT (after spec captured)
+  # ... write code ...
+  # Phase 5: COMPLETE (after implementation)
+  - babel coherence
+  - 'babel capture "TASK X.Y COMPLETE: Summary" --batch'
+
+principles:
+  - P6 (Token Efficiency)
+  - P11 (Self-Application)
+
+uses_context:
+  - Previous task captures
+  - Pending review queue
+  - Task completion history
+  - Constraint dependencies
+
+produces:
+  - Current task state
+  - Next task to work on
+  - Relevant context for next task
+
+composable_with:
+  - orient
+  - recall
+  - spec
+
+always_load: false
+load_on_demand: true
+user_invocable: true
+
+examples:
+  - |
+    ## FLOW 15: TASK CONTINUITY — Continuing Ticketed Work
+
+    ### When to Use
+
+    | Trigger Pattern | Example |
+    |-----------------|---------|
+    | "Continue the..." | "Continue the dashboard construction" |
+    | "Resume..." | "Resume B.2 implementation" |
+    | "Pick up where we left off" | "Pick up where we left off on auth" |
+    | "What's next on..." | "What's next on the refactor?" |
+
+  - |
+    ### Critical Distinction
+
+    | Mode | Command Sequence | Risk if Confused |
+    |------|------------------|------------------|
+    | **CONTINUE** | `history → find last COMPLETE → resume next` | Duplicating completed work |
+    | **START NEW** | `why → capture → spec → implement` | Contradicting prior decisions |
+
+  - |
+    ### Where Task State Lives
+
+    ```
+    WRONG ASSUMPTION: Tasks are stored as decisions or purposes
+    RIGHT REALITY:    Task progress lives in babel history as captures
+
+    Pattern in history:
+      ○ [92c8119d] Captured: "TASK A.2 COMPLETE: Tailwind CSS v4..."
+      ○ [0cb923b8] Captured: "TASK A.3 COMPLETE: shadcn/ui..."
+      ● [8af2ae52] Captured: "TASK B.1: Build PrincipleHealthBar..."
+
+    Task dependencies are in constraints:
+      [7eaca3bd] Task depends on A.4 (FastAPI scaffold)
+    ```
+
+  - |
+    ### Complete Continuation Workflow
+
+    ```bash
+    # PHASE 1: ORIENT (parallel — same as always)
+    babel status
+    babel tensions
+    babel questions
+
+    # PHASE 2: WORK STATE (sequential — specific to continuation)
+    babel review --list                           # What's pending approval?
+    babel history -n 30 | grep -E "TASK|COMPLETE" # What's done? What's in progress?
+
+    # PHASE 3: LOCATE NEXT TASK
+    babel list constraints --all | grep -i "depends"  # Find dependency chain
+    babel why "TASK X.Y specific topic"               # Get context for next task
+    ```
+
+  - |
+    ### Interpreting History Output
+
+    ```
+    TASK A.2 COMPLETE  → Done, don't repeat
+    TASK A.3 COMPLETE  → Done, don't repeat
+    TASK B.1:          → Started but no COMPLETE → may be in progress
+    No TASK B.2        → Not started yet → this is next
+    ```
+
+  - |
+    ### Step-by-Step Execution
+
+    | Step | Command | Why |
+    |------|---------|-----|
+    | 1 | `babel review --list` | See what's awaiting approval |
+    | 2 | `babel review --accept-all` | Clear the queue (if ready) |
+    | 3 | `babel history -n 30 \| grep TASK` | Find COMPLETE vs in-progress |
+    | 4 | Identify last COMPLETE + 1 | Sequential task numbering |
+    | 5 | `babel list constraints --all \| grep depends` | Know what blocks what |
+    | 6 | `babel why "TASK B.2 specific topic"` | Focused, not broad |
+    | 7 | `babel capture --spec <id>` if needed | Continue where left off |
+
+  - |
+    ### Anti-Patterns to Avoid
+
+    | Anti-Pattern | Problem | Token Cost |
+    |--------------|---------|------------|
+    | Multiple broad `babel why "dashboard"` | Generic context, not task state | High |
+    | `babel list decisions --filter "A.1"` | Tasks aren't stored as decisions | Wasted |
+    | Skipping `babel history` | Misses which tasks are COMPLETE | Critical |
+    | Re-reading entire spec files | 1500+ lines when only need current section | High |
+    | Starting without checking pending | May duplicate queued work | High |
+
+  - |
+    ### Example Session
+
+    ```bash
+    # User says: "Continue the dashboard construction"
+
+    # Step 1: Orient
+    babel status && babel tensions && babel questions
+
+    # Step 2: Check pending work
+    babel review --list
+    # If pending: babel review --accept-all
+
+    # Step 3: Find task state
+    babel history -n 30 | grep -E "TASK|COMPLETE"
+    # Output: A.2-A.8 COMPLETE, B.1 COMPLETE
+    # → Next task: B.2
+
+    # Step 4: Check dependencies
+    babel list constraints --all | grep -i "B.2\|depends"
+    # Output: B.2 depends on A.4 (FastAPI) ✓ already complete
+
+    # Step 5: Get specific context
+    babel why "TASK B.2 ConstraintStatus component"
+
+    # Step 6: Capture if not already captured
+    babel capture "TASK B.2: Build ConstraintStatus component" --batch
+
+    # Step 7: Add spec
+    babel capture --spec <id> "OBJECTIVE: Display HC1-HC5 status
+    ADD: ConstraintStatus.tsx, /api/status/constraints
+    MODIFY: Observatory.tsx
+    REMOVE: None
+    PRESERVE: Existing health display
+    RELATED: status.py, types.ts" --batch
+
+    # Step 8: Implement...
+
+    # Step 9: Complete
+    babel coherence
+    babel capture "TASK B.2 COMPLETE: ConstraintStatus implemented" --batch
+    ```
+
+  - |
+    ### User Hint for Efficiency
+
+    Encourage users to provide:
+    ```
+    "Continue [project] work. Current phase: [X]. Last completed: [Y]."
+    ```
+
+    This enables direct jump to `babel history` verification without broad discovery.
+
+  - |
+    ### Quick Reference: CONTINUE vs START NEW
+
+    | Aspect | CONTINUE | START NEW |
+    |--------|----------|-----------|
+    | First after orient | `babel history \| grep TASK` | `babel why "topic"` |
+    | Check for | COMPLETE vs in-progress | Existing decisions |
+    | Dependencies | `grep depends` on constraints | `babel why` queries |
+    | Spec capture | May already exist | Always needed |
+    | Risk if skipped | Duplicate completed work | Contradict prior decisions |

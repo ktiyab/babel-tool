@@ -200,3 +200,20 @@ class CheckCommand(BaseCommand):
         # Succession hint (centralized)
         from ..output import end_command
         end_command("check", {"has_issues": len(issues) > 0, "has_warnings": len(warnings) > 0})
+
+
+# =============================================================================
+# Command Registration (Self-Registration Pattern)
+# =============================================================================
+
+def register_parser(subparsers):
+    """Register check command parser."""
+    p = subparsers.add_parser('check', help='Verify project integrity and suggest recovery')
+    p.add_argument('--repair', action='store_true',
+                   help='Attempt automatic repair of issues')
+    return p
+
+
+def handle(cli, args):
+    """Handle check command dispatch."""
+    cli._check_cmd.check(repair=args.repair)

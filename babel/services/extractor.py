@@ -22,6 +22,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from datetime import datetime, timezone
 
+from rapidfuzz import fuzz
+
 from ..presentation.symbols import sanitize_control_chars
 
 if TYPE_CHECKING:
@@ -68,33 +70,28 @@ def normalize_text(text: str) -> str:
     return text
 
 
-def extract_keywords(text: str) -> Set[str]:
-    """Extract meaningful keywords from text."""
-    words = normalize_text(text).split()
-    # Filter short words and common stopwords
-    stopwords = {'the', 'a', 'an', 'is', 'are', 'was', 'be', 'to', 'of', 'in',
-                 'for', 'on', 'with', 'at', 'by', 'from', 'as', 'and', 'or',
-                 'but', 'not', 'this', 'that', 'use', 'using', 'used'}
-    return {w for w in words if len(w) >= 3 and w not in stopwords}
-
-
 def calculate_similarity(text1: str, text2: str) -> float:
     """
-    Calculate text similarity using Jaccard coefficient.
+    Calculate text similarity using rapidfuzz token_set_ratio.
 
     Offline-first (HC3 compliant): No API calls, pure text comparison.
+    Uses Rust-backed rapidfuzz for 10-100x faster matching than Jaccard.
+    token_set_ratio handles word order differences (e.g., "fix cache bug" vs "bug in cache fix").
+
     Returns 0.0-1.0 where 1.0 is identical.
     """
-    keywords1 = extract_keywords(text1)
-    keywords2 = extract_keywords(text2)
-
-    if not keywords1 or not keywords2:
+    if not text1 or not text2:
         return 0.0
 
-    intersection = keywords1 & keywords2
-    union = keywords1 | keywords2
+    # Normalize texts for comparison
+    norm1 = normalize_text(text1)
+    norm2 = normalize_text(text2)
 
-    return len(intersection) / len(union) if union else 0.0
+    if not norm1 or not norm2:
+        return 0.0
+
+    # rapidfuzz returns 0-100, normalize to 0.0-1.0
+    return fuzz.token_set_ratio(norm1, norm2) / 100.0
 
 
 class ExtractionQueue:

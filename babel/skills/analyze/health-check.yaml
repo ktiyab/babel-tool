@@ -1,0 +1,29 @@
+name: health-check
+category: analyze
+description: Quick project health overview - fast status check with top findings
+trigger: Quick overview needed, "how is the project", "check health", "quick scan"
+
+commands:
+  - babel scan --type health
+  - babel status
+
+principles:
+  - P11 (Self-Application)
+
+uses_context:
+  - Project purpose
+  - Decisions
+  - Constraints
+
+produces:
+  - Health status (healthy/concerns/issues)
+  - Top 3 findings
+  - Quick recommendations
+
+composable_with:
+  - orient
+  - maintain
+
+always_load: false
+load_on_demand: true
+user_invocable: true

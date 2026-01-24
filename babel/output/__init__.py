@@ -24,6 +24,7 @@ from typing import Any, Optional, List, TYPE_CHECKING
 
 if TYPE_CHECKING:
     from ..presentation.symbols import SymbolSet
+    from ..presentation.codec import IDCodec
 
 # Re-export for convenience
 from .base import BaseRenderer
@@ -135,7 +136,14 @@ def auto_detect_shape(data: Any) -> str:
 # Main Render Function
 # =============================================================================
 
-def get_renderer(format: str, symbols: "SymbolSet", width: int = None, full: bool = False) -> BaseRenderer:
+def get_renderer(
+    format: str,
+    symbols: "SymbolSet",
+    width: int = None,
+    full: bool = False,
+    codec: "IDCodec" = None,
+    debug: bool = None
+) -> BaseRenderer:
     """
     Get appropriate renderer instance.
 
@@ -144,6 +152,8 @@ def get_renderer(format: str, symbols: "SymbolSet", width: int = None, full: boo
         symbols: SymbolSet for visual elements
         width: Terminal width (auto-detect if None)
         full: If True, don't truncate content
+        codec: IDCodec for alias formatting (enables [AA-BB] display)
+        debug: Show debug info in IDs (auto-detect from BABEL_DEBUG if None)
 
     Returns:
         Renderer instance
@@ -156,7 +166,7 @@ def get_renderer(format: str, symbols: "SymbolSet", width: int = None, full: boo
         raise ValueError(f"Unknown format '{format}'. Valid: {valid}")
 
     renderer_class = RENDERERS[format]
-    return renderer_class(symbols=symbols, width=width, full=full)
+    return renderer_class(symbols=symbols, width=width, full=full, codec=codec, debug=debug)
 
 
 def render(
@@ -164,7 +174,9 @@ def render(
     format: str = "auto",
     symbols: "SymbolSet" = None,
     width: int = None,
-    full: bool = False
+    full: bool = False,
+    codec: "IDCodec" = None,
+    debug: bool = None
 ) -> str:
     """
     Render OutputSpec to formatted string.
@@ -177,13 +189,15 @@ def render(
         symbols: SymbolSet for visual elements (auto-detect if None)
         width: Terminal width (auto-detect if None)
         full: If True, don't truncate content
+        codec: IDCodec for alias formatting (enables [AA-BB] display)
+        debug: Show debug info in IDs (auto-detect from BABEL_DEBUG if None)
 
     Returns:
         Formatted string ready for printing
 
     Example:
         spec = OutputSpec(data=[...], shape="table", columns=["ID", "Name"])
-        output = render(spec, format="auto")
+        output = render(spec, format="auto", codec=codec)
         print(output)
     """
     import shutil
@@ -207,8 +221,8 @@ def render(
     else:
         effective_format = format
 
-    # Get renderer and render
-    renderer = get_renderer(effective_format, symbols, width, full)
+    # Get renderer and render (pass codec/debug for ID formatting)
+    renderer = get_renderer(effective_format, symbols, width, full, codec=codec, debug=debug)
     output = renderer.render(spec)
 
     # Append succession hint if enabled and command context provided

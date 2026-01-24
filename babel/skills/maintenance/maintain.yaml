@@ -1,0 +1,235 @@
+name: maintain
+category: maintenance
+description: Keep system healthy. Sync team changes, check coherence, deprecate obsolete decisions, verify integrity. Reactive and periodic health maintenance. Different from verify (post-implementation) and orient (session start).
+
+trigger: After git pull (merge team changes), something feels off (check alignment), decision is obsolete (mark deprecated), periodic health check, integrity concern, need audit trail
+
+commands:
+  # Team sync
+  - babel sync
+  # Coherence
+  - babel coherence
+  - babel coherence --full
+  - babel coherence --resolve
+  - babel coherence --resolve --batch
+  # Tensions
+  - babel tensions
+  - babel tensions --full
+  # Deprecation
+  - 'babel deprecate <id> "reason"'
+  # Integrity
+  - babel check
+  # Audit
+  - babel history <id>
+
+principles:
+  - P11 (Self-Application) - Babel maintains itself
+  - P5 (Adaptive Cycle Rate) - Response speed based on health status
+
+uses_context:
+  - Git history (for sync)
+  - Existing artifact IDs (for deprecate, history)
+
+produces:
+  - Merged team changes (from sync)
+  - Coherence status (aligned or drift)
+  - Surfaced tensions (with severity)
+  - Integrity verification (from check)
+  - Audit trail (from history)
+
+composable_with:
+  - orient (both surface tensions/questions, different contexts)
+  - verify (both use coherence, different triggers)
+  - tension (maintain discovers, tension resolves)
+  - revise (when deprecation isn't enough, use revision flow)
+  - discover (maintain + discover = full health picture)
+
+always_load: false
+load_on_demand: true
+user_invocable: true
+
+examples:
+  - |
+    ## FLOW 9: MAINTAIN — Keep the System Healthy
+
+    Reactive and periodic health maintenance for Babel.
+
+    **Distinction from other skills:**
+    - `verify`: Post-implementation coherence check
+    - `orient`: Session start briefing
+    - `maintain`: Reactive health checks, sync, deprecation
+
+  - |
+    ### Trigger Table
+
+    | Trigger | Command | Why |
+    |---------|---------|-----|
+    | After git pull | `babel sync` | Merge teammates' reasoning |
+    | Decision obsolete | `babel deprecate <id> "reason"` | Mark no longer valid |
+    | Something feels off | `babel coherence` | Check for drift |
+    | Resolve issues (AI) | `babel coherence --resolve --batch` | Non-interactive resolution |
+    | Integrity concern | `babel check` | Verify data consistency |
+    | Audit trail needed | `babel history <id>` | See decision evolution |
+
+  - |
+    ### Command Reference
+
+    ```bash
+    # TEAM SYNC
+    babel sync                         # Merge teammates' reasoning
+
+    # COHERENCE
+    babel coherence                    # Quick check
+    babel coherence --full             # Detailed analysis
+    babel coherence --resolve          # Interactive resolution (humans)
+    babel coherence --resolve --batch  # Non-interactive (for AI)
+
+    # TENSIONS
+    babel tensions                     # View open tensions
+    babel tensions --full              # Full details + severity
+
+    # DEPRECATION
+    babel deprecate <id> "reason"      # Mark artifact as obsolete
+
+    # INTEGRITY
+    babel check                        # Verify data consistency
+
+    # AUDIT
+    babel history <id>                 # See artifact evolution
+    ```
+
+  - |
+    ### Maintenance Cycle
+
+    ```
+    sync → coherence → tensions → [address issues]
+    ```
+
+    This is the standard maintenance loop for keeping system healthy.
+
+  - |
+    ### Post-Sync Sequence (IMPORTANT)
+
+    After `git pull`, don't just sync — check what changed:
+
+    ```bash
+    babel sync                    # Merge team changes
+    babel tensions                # Check for new conflicts
+    babel questions               # Check for new unknowns
+    ```
+
+    **This surfaces what teammates decided while you were away.**
+
+  - |
+    ### Health Symbols
+
+    | Symbol | Level | Meaning | Action |
+    |--------|-------|---------|--------|
+    | ◔ | High confusion | Many tensions, low alignment | Slow down, resolve tensions first |
+    | ◐ | Moderate | Some open items | Address before continuing |
+    | ● | Aligned | Healthy state | Safe to proceed with work |
+
+  - |
+    ### Deprecation vs Revision
+
+    | Situation | Use | Why |
+    |-----------|-----|-----|
+    | Decision simply obsolete | `babel deprecate` | No replacement needed |
+    | Decision needs replacement | REVISE flow | Maintains P4/P8 challenge chain |
+
+    **Deprecation example:**
+    ```bash
+    # Old decision: "Use SQLite" is simply obsolete
+    babel deprecate a1b2c3d4 "Feature removed from roadmap"
+    ```
+
+    **When to use REVISE instead:**
+    ```bash
+    # Decision needs replacement with full challenge chain
+    babel challenge <id> "reason"
+    babel evidence <challenge_id> "observation"
+    babel capture "new approach" --batch
+    babel resolve <id> --outcome revised --force --resolution "Superseded by new approach"
+    ```
+
+    See `/revise` skill for full revision workflow.
+
+  - |
+    ### Coherence Check Variations
+
+    ```bash
+    babel coherence               # Quick check — is system aligned?
+    babel coherence --full        # Detailed analysis — show all issues
+    babel coherence --resolve     # Interactive resolution (for humans)
+    babel coherence --resolve --batch  # Non-interactive (for AI operators)
+    ```
+
+    **If issues found:**
+    - Surface to user
+    - Consider challenges if intentional drift
+    - Fix if accidental drift
+
+  - |
+    ### History Output (Audit Trail)
+
+    ```bash
+    babel history <id>
+    # Shows artifact evolution:
+    # - Creation timestamp
+    # - Endorsements received
+    # - Evidence added
+    # - Challenges raised
+    # - Resolutions
+    # - Links created
+    ```
+
+    **Enables traceability (P8)** — see full lifecycle of any artifact.
+
+  - |
+    ### Overlap with Other Skills
+
+    | Skill | Shared Command | Distinction |
+    |-------|----------------|-------------|
+    | verify | `babel coherence` | verify = post-implementation, maintain = periodic/reactive |
+    | tension | `babel tensions` | tension = resolution workflow, maintain = discovery |
+    | orient | `babel tensions`, `babel questions` | orient = session start, maintain = reactive |
+
+    **Rule:** Use maintain for reactive health checks, verify after implementing, orient at session start.
+
+  - |
+    ### Complete Health Check Workflow
+
+    ```bash
+    # 1. Sync team changes (after git pull)
+    babel sync
+
+    # 2. Check coherence
+    babel coherence
+    # If issues: babel coherence --full
+
+    # 3. Review tensions
+    babel tensions
+    # Critical tensions (🔴) need immediate attention
+
+    # 4. Check for orphans (optional)
+    babel list --orphans
+
+    # 5. If integrity concerns
+    babel check
+
+    # 6. Review specific history if needed
+    babel history <id>
+    ```
+
+  - |
+    ### Consequence of Skipping
+
+    | Skip | Result |
+    |------|--------|
+    | Skip `babel sync` after pull | Team changes not merged, conflicts later |
+    | Skip periodic `coherence` | Drift undetected, compounds silently |
+    | Skip `deprecate` for obsolete | Stale decisions confuse future queries |
+    | Skip `check` when concerned | Data corruption goes unnoticed |
+
+    **Rule:** Maintain proactively. System health degrades silently without regular checks.
+

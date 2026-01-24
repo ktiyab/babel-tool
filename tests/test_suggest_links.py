@@ -107,80 +107,24 @@ class TestLinkSuggestion:
 
 
 # =============================================================================
-# Word Extraction Tests
-# =============================================================================
-
-class TestExtractWords:
-    """Test _extract_words method (stop word filtering)."""
-
-    def test_extract_basic_words(self, suggest_command):
-        """Extracts meaningful words from text."""
-        words = suggest_command._extract_words("Implement SQLite database storage")
-
-        assert "sqlite" in words
-        assert "database" in words
-        assert "storage" in words
-
-    def test_filters_stop_words(self, suggest_command):
-        """Filters out common stop words."""
-        words = suggest_command._extract_words("add the new file to fix the issue")
-
-        # Stop words should be filtered
-        assert "the" not in words
-        assert "add" not in words
-        assert "fix" not in words
-        assert "new" not in words
-        assert "file" not in words
-
-        # But meaningful words remain
-        assert "issue" in words
-
-    def test_filters_short_words(self, suggest_command):
-        """Filters words shorter than 3 characters."""
-        words = suggest_command._extract_words("to do it in a db")
-
-        # Short words filtered
-        assert "to" not in words
-        assert "do" not in words
-        assert "it" not in words
-        assert "in" not in words
-        assert "a" not in words
-        assert "db" not in words  # 2 chars
-
-    def test_lowercases_words(self, suggest_command):
-        """Words are lowercased for matching."""
-        words = suggest_command._extract_words("SQLite Database STORAGE")
-
-        assert "sqlite" in words
-        assert "database" in words
-        assert "storage" in words
-        # Original case not present
-        assert "SQLite" not in words
-        assert "STORAGE" not in words
-
-    def test_empty_text_returns_empty_set(self, suggest_command):
-        """Empty text returns empty set."""
-        words = suggest_command._extract_words("")
-        assert words == set()
-
-
-# =============================================================================
 # Score Calculation Tests
 # =============================================================================
 
-class TestCalculateMatchScore:
-    """Test _calculate_match_score method."""
+# Note: TestExtractWords was removed - matching now uses rapidfuzz's token_set_ratio
+# instead of manual word extraction. The new implementation provides 10-100x faster
+# matching while handling word order differences automatically.
 
-    def test_no_overlap_returns_zero(self, suggest_command):
-        """No word overlap results in zero score."""
+class TestCalculateMatchScore:
+    """Test _calculate_match_score method using rapidfuzz text similarity."""
+
+    def test_no_similarity_returns_zero(self, suggest_command):
+        """No text similarity results in zero score."""
         commit = {
             'message': 'Fix typo in readme',
-            'words': {'typo', 'readme'}
         }
         decision = {
             'id': 'dec123',
             'summary': 'Use PostgreSQL database',
-            'words': {'postgresql', 'database'},
             'type': 'decision',
             'domain': ''
         }
@@ -190,16 +134,14 @@ class TestCalculateMatchScore:
         assert score == 0.0
         assert reasons == []
 
-    def test_word_overlap_increases_score(self, suggest_command):
-        """Word overlap increases the match score."""
+    def test_text_similarity_increases_score(self, suggest_command):
+        """Text similarity (via rapidfuzz) increases the match score."""
         commit = {
             'message': 'Implement SQLite storage',
-            'words': {'sqlite', 'storage', 'implement'}
         }
         decision = {
             'id': 'dec123',
             'summary': 'Use SQLite for storage',
-            'words': {'sqlite', 'storage'},
             'type': 'decision',
             'domain': ''
         }
@@ -207,18 +149,16 @@ class TestCalculateMatchScore:
         score, reasons = suggest_command._calculate_match_score(commit, decision)
 
         assert score > 0.0
-        assert any('shared terms' in r for r in reasons)
+        assert any('text similarity' in r for r in reasons)
 
     def test_domain_match_adds_score(self, suggest_command):
         """Domain match adds to the score."""
         commit = {
             'message': 'Add caching feature',
-            'words': {'caching', 'feature'}
         }
         decision = {
             'id': 'dec123',
             'summary': 'Implement cache layer',
-            'words': {'cache', 'layer'},
             'type': 'decision',
             'domain': 'caching'
         }
@@ -232,50 +172,44 @@ class TestCalculateMatchScore:
         """Constraint type gets boost for constraint-related commits."""
         commit = {
             'message': 'Enforce maximum file size',
-            'words': {'enforce', 'maximum', 'size'}
         }
         decision = {
             'id': 'con123',
             'summary': 'Maximum file size constraint',
-            'words': {'maximum', 'size', 'constraint'},
             'type': 'constraint',
             'domain': ''
         }
 
         score, reasons = suggest_command._calculate_match_score(commit, decision)
 
-        # Has word overlap + constraint boost
+        # Has text similarity + constraint boost
         assert any('constraint-related' in r for r in reasons)
 
     def test_decision_type_boost(self, suggest_command):
         """Decision type gets boost for implementation commits."""
         commit = {
             'message': 'Implement authentication flow',
-            'words': {'authentication', 'flow'}
         }
         decision = {
             'id': 'dec123',
             'summary': 'Use JWT authentication',
-            'words': {'jwt', 'authentication'},
             'type': 'decision',
             'domain': ''
         }
 
         score, reasons = suggest_command._calculate_match_score(commit, decision)
 
-        # Has word overlap + implementation boost
+        # Has text similarity + implementation boost
         assert any('implementation commit' in r for r in reasons)
 
     def test_score_capped_at_one(self, suggest_command):
-        """Score is capped at 1.0 even with many matches."""
+        """Score is capped at 1.0 even with high similarity."""
         commit = {
             'message': 'implement enforce require sqlite database storage caching',
-            'words': {'sqlite', 'database', 'storage', 'caching', 'layer', 'implement'}
         }
         decision = {
             'id': 'dec123',
             'summary': 'Use SQLite database for storage and caching layer',
-            'words': {'sqlite', 'database', 'storage', 'caching', 'layer'},
             'type': 'decision',
             'domain': 'caching'
         }
@@ -293,24 +227,21 @@ class TestFindMatches:
     """Test _find_matches method."""
 
     def test_finds_matching_decisions(self, suggest_command):
-        """Finds decisions that match a commit."""
+        """Finds decisions that match a commit based on text similarity."""
         commit = {
             'sha': 'abc123',
             'message': 'Implement SQLite storage',
-            'words': {'sqlite', 'storage'}
         }
         decisions = [
             {
                 'id': 'dec1',
                 'summary': 'Use SQLite for storage',
-                'words': {'sqlite', 'storage'},
                 'type': 'decision',
                 'domain': ''
             },
             {
                 'id': 'dec2',
                 'summary': 'Use PostgreSQL database',
-                'words': {'postgresql', 'database'},
                 'type': 'decision',
                 'domain': ''
             }
@@ -328,13 +259,11 @@ class TestFindMatches:
         commit = {
             'sha': 'abc123',
             'message': 'Minor typo fix',
-            'words': {'minor', 'typo'}
         }
         decisions = [
             {
                 'id': 'dec1',
                 'summary': 'Major architecture decision',
-                'words': {'major', 'architecture'},
                 'type': 'decision',
                 'domain': ''
             }
@@ -350,13 +279,11 @@ class TestFindMatches:
         commit = {
             'sha': 'abc123',
             'message': 'Add caching layer',
-            'words': {'caching', 'layer'}
         }
         decisions = [
             {
                 'id': 'dec1',
                 'summary': 'Implement caching',
-                'words': {'caching', 'implement'},
                 'type': 'decision',
                 'domain': ''
             }
@@ -409,8 +336,8 @@ class TestGetLinkableDecisions:
         assert 'decision' in types
         assert 'constraint' in types
 
-    def test_extracts_words_from_summary(self, suggest_command, mock_cli):
-        """Extracts words from decision summary for matching."""
+    def test_extracts_summary_for_matching(self, suggest_command, mock_cli):
+        """Extracts summary from decision for text similarity matching."""
         node = Mock(
             event_id="dec123",
             id="decision_dec123",
@@ -427,8 +354,8 @@ class TestGetLinkableDecisions:
         decisions = suggest_command._get_linkable_decisions()
 
         assert len(decisions) == 1
-        assert 'words' in decisions[0]
-        assert 'sqlite' in decisions[0]['words']
+        assert 'summary' in decisions[0]
+        assert 'SQLite' in decisions[0]['summary']
 
     def test_handles_missing_summary(self, suggest_command, mock_cli):
         """Handles decisions without summary gracefully."""

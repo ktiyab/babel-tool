@@ -1,0 +1,35 @@
+name: expert-query
+category: analyze
+description: Answer specific technical question with decision references - direct answer grounded in project context
+trigger: Specific technical question, "should we...", "what about...", "is it safe to..."
+
+commands:
+  - babel scan "specific question"
+
+principles:
+  - P3 (Expertise-Weighted)
+  - P5 (Dual-Test Truth)
+
+uses_context:
+  - Project purpose
+  - All decisions
+  - All constraints
+
+produces:
+  - Direct answer referencing specific decisions
+  - Explanation of how answer relates to purpose
+  - Gaps or concerns if found
+
+composable_with:
+  - recall
+  - challenge
+
+always_load: false
+load_on_demand: true
+user_invocable: true
+
+# Key behavior:
+# - Direct answer, not generic advice
+# - References specific decision IDs
+# - Relates answer to project purpose
+# - Surfaces gaps if question reveals missing context

@@ -27,6 +27,7 @@ from typing import List, Dict, Optional, Tuple
 
 from ..commands.base import BaseCommand
 from ..presentation.symbols import safe_print
+from ..core.symbols import CodeSymbolStore
 
 
 class MapCommand(BaseCommand):
@@ -582,3 +583,271 @@ Last updated: {timestamp}
             return True
 
         return False
+
+    # -------------------------------------------------------------------------
+    # Symbol Index Commands (CodeSymbolStore integration)
+    # -------------------------------------------------------------------------
+
+    def _get_symbol_store(self) -> CodeSymbolStore:
+        """Get or create CodeSymbolStore instance."""
+        if not hasattr(self, '_symbol_store'):
+            self._symbol_store = CodeSymbolStore(
+                babel_dir=self.babel_dir,
+                events=self.events,
+                graph=self.graph,
+                project_dir=self.project_dir
+            )
+        return self._symbol_store
+
+    def index(self, incremental: bool = False, path: str = None):
+        """
+        Build or update the code symbol index.
+
+        Args:
+            incremental: Only index changed files (git diff based)
+            path: Specific path to index (required for full index, not needed for incremental)
+        """
+        symbols = self.symbols
+        store = self._get_symbol_store()
+
+        if incremental:
+            print("Indexing changed files (incremental)...")
+            files, syms = store.index_changed_files()
+
+            if files == 0:
+                print(f"{symbols.check_pass} Index is up to date (no changes detected).")
+            else:
+                print(f"\n{symbols.check_pass} Indexed {files} file(s), {syms} symbol(s).")
+        else:
+            # Whitelist principle: require explicit path to avoid indexing third-party code
+            if not path:
+                print("Error: path is required for indexing.")
+                print("Use: babel map --index <path>")
+                return
+
+            print(f"Indexing path: {path}")
+
+            # Build patterns for both Python and Markdown files
+            if path.endswith('.py') or path.endswith('.md'):
+                # Single file specified
+                patterns = [path]
+            else:
+                # Directory - include both Python and Markdown
+                patterns = [
+                    f"{path}/**/*.py",
+                    f"{path}/**/*.md"
+                ]
+
+            files, syms = store.index_project(patterns=patterns)
+
+            print(f"\n{symbols.check_pass} Indexed {files} file(s), {syms} symbol(s).")
+
+        # Show stats
+        stats = store.stats()
+        print(f"\nSymbol Index:")
+        print(f"  Code:")
+        print(f"    Classes:   {stats['classes']}")
+        print(f"    Functions: {stats['functions']}")
+        print(f"    Methods:   {stats['methods']}")
+
+        # Show documentation stats if any
+        doc_total = stats.get('documents', 0) + stats.get('sections', 0) + stats.get('subsections', 0)
+        if doc_total > 0:
+            print(f"  Documentation:")
+            print(f"    Documents:   {stats.get('documents', 0)}")
+            print(f"    Sections:    {stats.get('sections', 0)}")
+            print(f"    Subsections: {stats.get('subsections', 0)}")
+
+        print(f"  Files:     {stats['files']}")
+        print(f"\nQuery with: babel map --query \"ClassName\" or \"SectionName\"")
+
+        # Succession hint
+        from ..output import end_command
+        end_command("map", {"indexed": True})
+
+    def clear_symbols(self, patterns: list, exclude: str = None):
+        """
+        Clear symbols matching path patterns.
+
+        Code symbols are cache (not intent), so clearing is safe.
+
+        Args:
+            patterns: List of path patterns to clear (e.g., ['.venv', 'node_modules'])
+            exclude: Optional pattern to exclude from clearing
+        """
+        symbols = self.symbols
+        store = self._get_symbol_store()
+
+        total_cache = 0
+        total_graph = 0
+
+        for pattern in patterns:
+            print(f"Clearing symbols matching: {pattern}")
+            if exclude:
+                print(f"  (excluding: {exclude})")
+
+            cache_cleared, graph_cleared = store.clear_symbols(pattern, exclude)
+            total_cache += cache_cleared
+            total_graph += graph_cleared
+
+            print(f"  Cache: {cache_cleared} symbols cleared")
+            print(f"  Graph: {graph_cleared} nodes deleted")
+
+        print(f"\n{symbols.check_pass} Total cleared: {total_cache} from cache, {total_graph} from graph")
+
+        # Show remaining stats
+        stats = store.stats()
+        print(f"\nRemaining symbols:")
+        print(f"  Classes:   {stats['classes']}")
+        print(f"  Functions: {stats['functions']}")
+        print(f"  Methods:   {stats['methods']}")
+        print(f"  Files:     {stats['files']}")
+
+        # Succession hint
+        from ..output import end_command
+        end_command("map", {"cleared": True, "patterns": patterns})
+
+    def query_symbols(self, name: str, symbol_type: str = None):
+        """
+        Query the symbol index.
+
+        Args:
+            name: Symbol name to search for
+            symbol_type: Optional filter (class, function, method)
+        """
+        symbols = self.symbols
+        store = self._get_symbol_store()
+
+        results = store.query(name, symbol_type=symbol_type)
+
+        if not results:
+            print(f"\nNo symbols found matching \"{name}\".")
+            print(f"\nBuild index with: babel map --index")
+            return
+
+        print(f"\nFound {len(results)} symbol(s) matching \"{name}\":\n")
+
+        for sym in results:
+            type_icon = {
+                'class': 'C',
+                'function': 'F',
+                'method': 'M',
+                'module': 'mod'
+            }.get(sym.symbol_type, '?')
+
+            # Format: [C] ClassName @ file.py:45-120
+            location = f"{sym.file_path}:{sym.line_start}"
+            if sym.line_end != sym.line_start:
+                location += f"-{sym.line_end}"
+
+            safe_print(f"  [{type_icon}] {sym.name} @ {location}")
+            if sym.signature:
+                safe_print(f"      {sym.signature}")
+            if sym.docstring:
+                safe_print(f"      \"{sym.docstring[:60]}...\"" if len(sym.docstring) > 60 else f"      \"{sym.docstring}\"")
+            print()
+
+        print(f"Load specific symbol: babel gather --file {results[0].file_path} --limit {results[0].line_end - results[0].line_start + 10}")
+
+        # Succession hint
+        from ..output import end_command
+        end_command("map", {"query": name})
+
+    def index_stats(self):
+        """Show symbol index statistics."""
+        symbols = self.symbols
+        store = self._get_symbol_store()
+        stats = store.stats()
+
+        print("\nSymbol Index Statistics")
+        print("=" * 40)
+
+        if stats['total'] == 0:
+            print(f"Status:  {symbols.check_warn} Empty (no symbols indexed)")
+            print(f"\nBuild index with: babel map --index")
+            return
+
+        print(f"Status:  {symbols.check_pass} {stats['total']} symbols indexed")
+        print(f"\nBreakdown:")
+        print(f"  Classes:   {stats['classes']}")
+        print(f"  Functions: {stats['functions']}")
+        print(f"  Methods:   {stats['methods']}")
+        print(f"  Files:     {stats['files']}")
+
+        # Succession hint
+        from ..output import end_command
+        end_command("map", {"stats": True})
+
+
+# =============================================================================
+# Command Registration (Self-Registration Pattern)
+# =============================================================================
+
+COMMAND_NAME = 'map'
+
+
+def register_parser(subparsers):
+    """Register map command parser."""
+    p = subparsers.add_parser('map',
+                              help='Generate project structure map for LLM understanding')
+    p.add_argument('--refresh', action='store_true',
+                   help='Regenerate map from scratch (all phases)')
+    p.add_argument('--update', action='store_true',
+                   help='Incremental update (only changed files)')
+    p.add_argument('--status', action='store_true',
+                   help='Show map status')
+    # Symbol index commands
+    p.add_argument('--index', nargs='*', metavar='PATH',
+                   help='Build code symbol index for specified path(s). Required: babel map --index <path> [<path>...]')
+    p.add_argument('--index-incremental', action='store_true',
+                   help='Incrementally update symbol index (git diff based, safe)')
+    p.add_argument('--index-clear', nargs='+', metavar='PATTERN',
+                   help='Clear symbols matching path pattern(s). Example: babel map --index-clear .venv node_modules')
+    p.add_argument('--except', dest='exclude_pattern', type=str, metavar='PATTERN',
+                   help='Exclude pattern from --index-clear. Example: babel map --index-clear . --except babel-tool')
+    p.add_argument('--query', type=str, metavar='NAME',
+                   help='Query symbol index by name')
+    p.add_argument('--index-stats', action='store_true',
+                   help='Show symbol index statistics')
+    return p
+
+
+def handle(cli, args):
+    """Handle map command dispatch."""
+    # Symbol index commands (check first)
+    if args.index is not None:  # --index was used (may be empty list)
+        if not args.index:
+            # --index without paths: require explicit path (whitelist principle)
+            print("Error: --index requires path(s) to index.")
+            print("")
+            print("Usage: babel map --index <path> [<path>...]")
+            print("")
+            print("Examples:")
+            print("  babel map --index src/")
+            print("  babel map --index babel-tool/ tests/")
+            print("  babel map --index mypackage/core.py")
+            print("")
+            print("Why: Indexing requires explicit paths to avoid accidentally")
+            print("     indexing third-party code (.venv, node_modules, etc.)")
+            return
+        # Index each specified path
+        for path in args.index:
+            cli._map_cmd.index(incremental=False, path=path)
+        return
+    if args.index_incremental:
+        cli._map_cmd.index(incremental=True, path=None)
+    elif args.index_clear:
+        cli._map_cmd.clear_symbols(args.index_clear, args.exclude_pattern)
+    elif args.query:
+        cli._map_cmd.query_symbols(args.query)
+    elif args.index_stats:
+        cli._map_cmd.index_stats()
+    # Original map commands
+    elif args.status:
+        cli._map_cmd.status()
+    elif args.refresh:
+        cli._map_cmd.refresh()
+    elif args.update:
+        cli._map_cmd.update()
+    else:
+        cli._map_cmd.status()

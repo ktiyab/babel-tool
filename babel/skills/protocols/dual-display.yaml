@@ -1,0 +1,169 @@
+name: DUAL-DISPLAY
+description: Every artifact needs both ID and readable summary. Enables comprehension AND action. Without both, either understanding or execution is blocked. Applies to AI too.
+rule: Format all artifact output as "[ID] readable summary". Both components required. Never output ID alone or summary alone.
+
+applies_to:
+  - All artifact output
+  - All decision references
+  - All list displays
+  - All table entries
+
+user_invocable: false
+
+examples:
+  - |
+    ## DUAL-DISPLAY PROTOCOL — ID + Summary Required
+
+    **The Rule:**
+    Every displayed item needs BOTH components:
+
+    | Component | Purpose | Example |
+    |-----------|---------|---------|
+    | **ID** | Actionable reference | `[80a2241a]` |
+    | **Name/Summary** | Human comprehension | `Use IDResolver for fuzzy matching` |
+
+    **Format:** `[ID] readable summary`
+
+  - |
+    ### Why Both Are Necessary
+
+    | Output | Problem | Result |
+    |--------|---------|--------|
+    | ID alone | `[80a2241a]` tells nothing | Opaque — no understanding |
+    | Name alone | Can't run `babel endorse ???` | Blocked — can't act |
+    | **Both together** | Understand AND act | ✓ Works |
+
+    **Without both, you either can't comprehend or can't act.**
+
+  - |
+    ### This Applies to AI Too
+
+    You (the AI) also need both:
+    - **IDs** to execute commands (`babel endorse a1b2c3d4`)
+    - **Summaries** to understand context
+
+    Without both:
+    - ID only → you can act but don't understand
+    - Summary only → you understand but can't act
+
+  - |
+    ### Correct Format
+
+    **Inline:**
+    ```
+    [80a2241a] Use IDResolver for fuzzy matching
+    [81cdbf99] Implement health calculation
+    ```
+
+    **In tables:**
+    ```
+    | ID | Summary |
+    |----|---------|
+    | `80a2241a` | Use IDResolver for fuzzy matching |
+    | `81cdbf99` | Implement health calculation |
+    ```
+
+  - |
+    ### WRONG Format (DO NOT)
+
+    **ID alone (opaque):**
+    ```
+    80a2241a
+    81cdbf99
+    ```
+
+    **Summary alone (can't act):**
+    ```
+    Use IDResolver for fuzzy matching
+    Implement health calculation
+    ```
+
+    **Verbose split (harder to scan):**
+    ```
+    ID: 80a2241a
+    Summary: Use IDResolver for fuzzy matching
+    ---
+    ID: 81cdbf99
+    Summary: Implement health calculation
+    ```
+
+  - |
+    ### Format Contrast
+
+    **CORRECT:**
+    ```
+    [80a2241a] Use IDResolver for fuzzy matching
+    [81cdbf99] Implement health calculation
+    ```
+
+    **WRONG:**
+    ```
+    ID: 80a2241a
+    Summary: Use IDResolver for fuzzy matching
+
+    ID: 81cdbf99
+    Summary: Implement health calculation
+    ```
+
+    **The compact `[ID] summary` format is easier to scan and act on.**
+
+  - |
+    ### In Tables (With WHY Column)
+
+    When showing multiple artifacts, add WHY:
+
+    **GOOD:**
+    | ID | Summary | WHY |
+    |----|---------|-----|
+    | `969f9ca7` | Lower consensus to 1 | Solo projects can validate |
+    | `f87af1c2` | Solo can't reach 2 | Explains why threshold change needed |
+
+    **BAD:**
+    ```
+    [969f9ca7] Lower consensus to 1
+    [f87af1c2] Solo can't reach 2
+    ```
+    (Missing context — user sees data but no understanding)
+
+  - |
+    ### Examples
+
+    **DO:**
+    - `[a1b2c3d4] Use SQLite for offline storage`
+    - `[80a2241a] Use IDResolver for fuzzy matching`
+    - `| \`969f9ca7\` | Lower consensus to 1 |`
+
+    **DON'T:**
+    - `a1b2c3d4` (ID alone is opaque)
+    - `"Use SQLite for offline storage"` (can't act without ID)
+    - Multi-line verbose format
+
+  - |
+    ### When Referencing in Text
+
+    **CORRECT:**
+    ```
+    "This relates to [a1b2c3d4] Use SQLite decision"
+    "Endorse with: babel endorse a1b2c3d4"
+    ```
+
+    **WRONG:**
+    ```
+    "This relates to the SQLite decision"
+    "Endorse the decision about SQLite"
+    ```
+
+    **Include the ID so user can act immediately.**
+
+  - |
+    ### The Rule (Summary)
+
+    ```
+    ALWAYS: [ID] readable summary
+    NEVER:  ID alone OR summary alone
+
+    For tables: Include ID, Summary, and WHY columns
+    ```
+
+    **Dual-display enables: Understand → Decide → Act**
+

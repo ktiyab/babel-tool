@@ -201,8 +201,9 @@ class TestP3ExpertiseAuthority:
 
         assert code == 0, f"List decisions failed: {stderr}"
         # Should have decisions (this is a real project)
+        # IDs are now in AA-BB codec format (e.g., [KN-JV])
         import re
-        ids = re.findall(r'\[([a-f0-9]{8})\]', stdout)
+        ids = re.findall(r'\[([A-Z]{2}-[A-Z]{2})\]', stdout)
         assert len(ids) > 0, "Real project should have decisions"
 
 
@@ -431,13 +432,14 @@ class TestRealDataIntegrity:
         assert has_counts, "Status should show artifact counts"
 
     def test_decisions_have_ids(self, tower_project):
-        """Real decisions have proper ID format."""
+        """Real decisions have proper ID format (AA-BB codec)."""
         stdout, stderr, code = run_babel(["list", "decisions"], cwd=tower_project)
 
         assert code == 0
+        # IDs are now in AA-BB codec format (e.g., [KN-JV])
         import re
-        ids = re.findall(r'\[([a-f0-9]{8})\]', stdout)
-        assert len(ids) > 0, "Decisions should have 8-char hex IDs"
+        ids = re.findall(r'\[([A-Z]{2}-[A-Z]{2})\]', stdout)
+        assert len(ids) > 0, "Decisions should have AA-BB codec IDs"
 
     def test_why_query_returns_context(self, tower_project):
         """babel why returns context for known topics."""

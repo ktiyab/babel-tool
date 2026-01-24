@@ -40,10 +40,11 @@ class DeprecateCommand(BaseCommand):
     def _is_deprecated(self, artifact_id: str) -> Optional[dict]:
         """Check if artifact is deprecated. Returns deprecation info or None."""
         deprecated = self._get_deprecated_ids()
-        # Check both full ID and prefix matches
-        for dep_id, info in deprecated.items():
-            if dep_id == artifact_id or dep_id.startswith(artifact_id) or artifact_id.startswith(dep_id):
-                return info
+        # Use centralized resolve_id for codec alias and prefix matching
+        candidate_ids = list(deprecated.keys())
+        resolved_id = self._cli.resolve_id(artifact_id, candidate_ids, "deprecated artifact")
+        if resolved_id:
+            return deprecated[resolved_id]
         return None
 
     def deprecate(
@@ -75,7 +76,7 @@ class DeprecateCommand(BaseCommand):
                 return
 
         # Find the target artifact (decision, constraint, etc.)
-        target_node = self._cli._find_node_by_id(artifact_id)
+        target_node = self._cli._resolve_node(artifact_id, type_label="artifact")
 
         if not target_node:
             print(f"Artifact not found: {artifact_id}")
@@ -83,18 +84,18 @@ class DeprecateCommand(BaseCommand):
             decisions = self.graph.get_nodes_by_type("decision")[-5:]
             for d in decisions:
                 summary = d.content.get("summary", "")[:40]
-                print(f"  {d.id[:8]} | {summary}")
+                print(f"  {self._cli.format_id(d.id)} {summary}")
             return
 
         # Check if already deprecated
         if self._is_deprecated(target_node.id):
-            print(f"Artifact [{target_node.id[:8]}] is already deprecated.")
+            print(f"Artifact {self._cli.format_id(target_node.id)} is already deprecated.")
             return
 
         # Validate superseded_by if provided
         replacement_node = None
         if superseded_by:
-            replacement_node = self._cli._find_node_by_id(superseded_by)
+            replacement_node = self._cli._resolve_node(superseded_by, type_label="artifact")
             if not replacement_node:
                 print(f"Warning: Replacement artifact '{superseded_by}' not found.")
 
@@ -108,12 +109,12 @@ class DeprecateCommand(BaseCommand):
         # Deprecation is shared (team needs to know)
         self.events.append(event, scope=EventScope.SHARED)
 
-        print(f"\n{symbols.deprecated} Deprecated [{target_node.id[:8]}]")
+        print(f"\n{symbols.deprecated} Deprecated {self._cli.format_id(target_node.id)}")
         print(f"  {target_node.type}: {target_node.content.get('summary', '')[:50]}")
         print(f"  Lesson: {reason}")
 
         if replacement_node:
-            print(f"  Superseded by: [{replacement_node.id[:8]}]")
+            print(f"  Superseded by: {self._cli.format_id(replacement_node.id)}")
 
         print()
         print("This artifact is now de-prioritized in queries.")
@@ -122,3 +123,28 @@ class DeprecateCommand(BaseCommand):
         # Succession hint (centralized)
         from ..output import end_command
         end_command("deprecate", {})
+
+
+# =============================================================================
+# Command Registration (Self-Registration Pattern)
+# =============================================================================
+
+COMMAND_NAME = 'deprecate'
+
+
+def register_parser(subparsers):
+    """Register deprecate command parser."""
+    p = subparsers.add_parser('deprecate', help='Deprecate an artifact (P7: living memory)')
+    p.add_argument('artifact_id', help='Artifact ID (or prefix) to deprecate')
+    p.add_argument('reason', help='Why it is being deprecated')
+    p.add_argument('--superseded-by', help='ID of replacement artifact')
+    return p
+
+
+def handle(cli, args):
+    """Handle deprecate command dispatch."""
+    cli._deprecate_cmd.deprecate(
+        args.artifact_id,
+        args.reason,
+        superseded_by=args.superseded_by
+    )

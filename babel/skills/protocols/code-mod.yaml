@@ -1,0 +1,261 @@
+name: CODE-MOD
+description: Complete code modification workflow. Pre-flight checklist PER FILE, user review, capture, implement, verify. HC2 requires human validation before implementation. Never code without completing this workflow.
+rule: Before modifying ANY file, STOP and complete full workflow. Pre-flight → WAIT → TEST → CAPTURE → IMPLEMENT → Verify. Never skip WAIT.
+
+applies_to:
+  - Before any code change
+  - Before any file modification
+  - Before any refactoring
+
+user_invocable: false
+
+examples:
+  - |
+    ## CODE-MOD PROTOCOL — Complete Code Modification Workflow
+
+    **The Rule:**
+    Before modifying ANY file, STOP and complete full workflow:
+    ```
+    Pre-flight → WAIT → TEST → CAPTURE → IMPLEMENT → Verify
+    ```
+
+    **HC2 Connection:** Human must review before implementation.
+
+  - |
+    ### Pre-Flight Checklist (MANDATORY per file)
+
+    | Field | Purpose | Example |
+    |-------|---------|---------|
+    | **OBJECTIVE** | Restate the intent — what problem this solves | "Add caching to reduce API calls" |
+    | **ADD** | What must be introduced to fulfill intent | "Redis client in config.py" |
+    | **MODIFY** | What existing code must change | "api/endpoints.py to use decorator" |
+    | **REMOVE** | What to eliminate — prevents regression | "Old inline cache logic" |
+    | **PRESERVE** | What must NOT be touched | "Existing rate limiting logic" |
+    | **RELATED** | Dependencies that INFORM this change | "config.py, api/endpoints.py" |
+    | **TEST** | What tests validate functionality | "Cache hit, TTL expiration" |
+    | **NOTE** | Implementation notes, edge cases | "Redis connection pooling needed" |
+
+  - |
+    ### Pre-Flight Format
+
+    ```
+    OBJECTIVE: [Restate intent — what problem this solves]
+
+    ADD:
+    - [What must be introduced]
+    - [Additional additions]
+
+    MODIFY:
+    - [What must change]
+    - [Additional modifications]
+
+    REMOVE:
+    - [What to eliminate]
+    - (None if nothing to remove)
+
+    PRESERVE:
+    - [What must NOT change]
+    - [Critical logic to protect]
+
+    RELATED:
+    - [Files that inform this change]
+    - [Dependencies to consider]
+
+    TEST:
+    - [Validation criteria]
+    - [Test scenarios]
+
+    NOTE:
+    - [Edge cases, caveats]
+    - (Optional)
+    ```
+
+  - |
+    ### Scope Discipline
+
+    ```
+    IN SCOPE:  Only what serves the current resolution
+    OUT:       Any unrelated engineering — DO NOT
+    ```
+
+    **Anti-patterns:**
+    - Adding features while fixing a bug
+    - Refactoring adjacent code "while you're there"
+    - Improving code outside the stated objective
+    - Adding error handling for hypothetical scenarios
+
+  - |
+    ### Complete Workflow (6 Steps)
+
+    ```
+    1. PRE-FLIGHT → Complete checklist for each file
+    2. WAIT       → Present to user, get review (HC2)
+    3. TEST       → Plan test scenarios
+    4. CAPTURE    → babel capture --spec <id> "..." --batch
+    5. IMPLEMENT  → Write code (after approval)
+    6. VERIFY     → babel coherence, check alignment
+    ```
+
+    **Never skip step 2 (WAIT).** HC2 requires human validation.
+
+  - |
+    ### WAIT Step (CRITICAL)
+
+    After completing pre-flight, present to user:
+
+    ```
+    "Specification ready for [file/component]. Please review:
+     - Objective: [summary]
+     - Files affected: [list]
+     - Tests planned: [list]
+
+     Review with: `babel review`
+
+     Shall I proceed with implementation?"
+    ```
+
+    **Do NOT implement before user reviews specification.**
+
+  - |
+    ### CAPTURE Step
+
+    Connection to `/spec` skill:
+
+    ```bash
+    # Pre-flight fields = spec capture format
+    babel capture --spec abc12345 "OBJECTIVE: Add caching to reduce API calls
+
+    ADD:
+    - Redis client initialization in config.py
+    - cache_response decorator in utils/cache.py
+    - TTL configuration in settings
+
+    MODIFY:
+    - api/endpoints.py to use decorator
+    - requirements.txt to add redis
+
+    REMOVE:
+    - None
+
+    PRESERVE:
+    - Existing rate limiting logic
+    - Error handling patterns
+
+    RELATED:
+    - config.py (initialization patterns)
+    - api/endpoints.py (current structure)
+
+    TEST:
+    - Cache hit returns stored value
+    - Cache miss calls API and stores
+    - TTL expiration works correctly
+
+    NOTE:
+    - Redis connection pooling needed for production
+    - Consider fallback if Redis unavailable" --batch
+    ```
+
+  - |
+    ### Verification Checklist (Post-Implementation)
+
+    After implementing, verify:
+
+    - [ ] Changes respect the stated intent (not just technically work)?
+    - [ ] Removals traced — no regressions, no orphaned code?
+    - [ ] Related files considered and updated accordingly?
+    - [ ] Tests created as planned?
+
+    Then run:
+    ```bash
+    babel coherence
+    ```
+
+  - |
+    ### Complete Example
+
+    ```
+    # Step 1: PRE-FLIGHT
+    OBJECTIVE: Add Redis caching to reduce API rate limit hits
+
+    ADD:
+    - redis_client.py with connection pooling
+    - cache_decorator.py in utils/
+
+    MODIFY:
+    - api_handler.py to use cache decorator
+    - requirements.txt to include redis package
+
+    REMOVE:
+    - None
+
+    PRESERVE:
+    - Existing rate limit tracking
+    - Error response format
+
+    RELATED:
+    - api_config.py (config patterns)
+    - api_handler.py (handler structure)
+
+    TEST:
+    - Cached response returns in <10ms
+    - Cache miss triggers API call
+    - TTL expiration refreshes cache
+
+    NOTE:
+    - Use connection pooling for production load
+
+    # Step 2: WAIT
+    "Specification ready. Please review before I implement.
+     Review with: `babel review`"
+
+    # Step 3: TEST (already planned above)
+
+    # Step 4: CAPTURE
+    babel capture --spec abc123 "OBJECTIVE:... [full spec]" --batch
+
+    # Step 5: IMPLEMENT (after user approves)
+    [write code]
+
+    # Step 6: VERIFY
+    babel coherence
+    ```
+
+  - |
+    ### Common Mistakes (DO NOT)
+
+    | Mistake | Why It's Wrong | Fix |
+    |---------|----------------|-----|
+    | Start coding without pre-flight | Code won't match intent | Complete checklist first |
+    | Skip WAIT | HC2 violated — human not consulted | Always present for review |
+    | Skip CAPTURE | Implementation plan evaporates | Use `babel capture --spec` |
+    | Make unrelated changes | Scope creep, unexpected bugs | Strict scope discipline |
+    | Skip verification | Drift undetected | Run `babel coherence` |
+
+  - |
+    ### Consequence of Skipping Steps
+
+    | Skip | Result |
+    |------|--------|
+    | Skip pre-flight | Code doesn't match intent, scope unclear |
+    | Skip WAIT | HC2 violated — human authority bypassed |
+    | Skip CAPTURE | Implementation plan evaporates when context compresses |
+    | Skip TEST | No validation criteria, bugs undetected |
+    | Skip VERIFY | Drift accumulates, coherence lost |
+
+  - |
+    ### The Rule (Summary)
+
+    ```
+    BEFORE modifying ANY file:
+      1. Complete pre-flight checklist
+      2. WAIT for user review (HC2)
+      3. Capture with babel capture --spec
+      4. THEN implement
+
+    AFTER implementing:
+      5. Verify with babel coherence
+      6. Surface any drift immediately
+    ```
+
+    **"Technically works" ≠ "Matches intent"**
+

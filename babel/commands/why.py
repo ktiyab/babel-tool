@@ -18,6 +18,7 @@ from typing import Optional, List, Set
 from ..commands.base import BaseCommand
 from ..core.commit_links import CommitLinkStore
 from ..core.events import EventType
+from ..core.symbols import CodeSymbolStore
 from ..presentation.symbols import safe_print
 
 
@@ -84,29 +85,41 @@ class WhyCommand(BaseCommand):
 
         P1: Synthesizes complexity into clarity (not just search results).
         P7: Surfaces graph relationships as readable insight.
+        P8: Surfaces rejections for learning (Failure Metabolism).
+        Phase 2: Includes code symbol locations for comprehensive context.
 
         Uses LLM to explain WHY, not just WHERE.
         Falls back to listing if no LLM available.
         """
-        # Gather relevant artifacts
+        # Gather relevant artifacts (decisions, constraints, principles)
         artifacts = self._gather_context(query)
 
-        if not artifacts:
+        # Gather rejection context (P8: Failure Metabolism)
+        rejections = self._gather_rejection_context(query)
+
+        # Gather code symbol context (Phase 2: code locations)
+        symbols = self._gather_symbol_context(query)
+
+        if not artifacts and not rejections and not symbols:
             print(f"\nNo matches for \"{query}\".")
             print("Try capturing more context about this topic.")
             return
 
         # Try LLM synthesis if available
         if self.provider and self.provider.is_available:
-            self._synthesized(query, artifacts)
+            self._synthesized(query, artifacts, rejections, symbols)
         else:
-            self._fallback(query, artifacts)
+            self._fallback(query, artifacts, rejections, symbols)
 
         # Succession hint (centralized)
-        # Check for unlinked artifacts to provide context-aware hint
+        # Check for unlinked artifacts and symbol context for hints
         from ..output import end_command
-        orphans = self.graph.find_orphans()
-        end_command("why", {"found_unlinked": len(orphans) > 0})
+        orphan_count = self.graph.count_orphans()  # O(1) lookup instead of fetching all
+        end_command("why", {
+            "found_unlinked": orphan_count > 0,
+            "found_symbols": len(symbols) > 0,
+            "no_symbols": len(symbols) == 0 and len(artifacts) > 0,  # Has artifacts but no code
+        })
 
     # -------------------------------------------------------------------------
     # Helper Methods
@@ -135,21 +148,22 @@ class WhyCommand(BaseCommand):
         Get specifications linked to an artifact.
 
         Returns list of spec data dicts with objective, add, modify, etc.
+        Uses read_by_type() for O(1) type lookup instead of iterating all events.
         """
         specs = []
-        for event in self.events.read_all():
-            if event.type == EventType.SPECIFICATION_ADDED:
-                need_id = event.data.get('need_id', '')
-                # Match if artifact_id matches or is prefix of need_id
-                if need_id == artifact_id or need_id.startswith(artifact_id) or artifact_id.startswith(need_id[:8]):
-                    specs.append({
-                        'objective': event.data.get('objective', ''),
-                        'add': event.data.get('add', []),
-                        'modify': event.data.get('modify', []),
-                        'remove': event.data.get('remove', []),
-                        'preserve': event.data.get('preserve', []),
-                        'related_files': event.data.get('related_files', [])
-                    })
+        # Use type-indexed cache instead of read_all() + filter
+        for event in self.events.read_by_type(EventType.SPECIFICATION_ADDED):
+            need_id = event.data.get('need_id', '')
+            # Match if artifact_id matches or is prefix of need_id
+            if need_id == artifact_id or need_id.startswith(artifact_id) or artifact_id.startswith(need_id[:8]):
+                specs.append({
+                    'objective': event.data.get('objective', ''),
+                    'add': event.data.get('add', []),
+                    'modify': event.data.get('modify', []),
+                    'remove': event.data.get('remove', []),
+                    'preserve': event.data.get('preserve', []),
+                    'related_files': event.data.get('related_files', [])
+                })
         return specs
 
     def _gather_context(self, query: str) -> list:
@@ -229,6 +243,170 @@ class WhyCommand(BaseCommand):
         all_artifacts.sort(key=lambda x: (x['score'], x['related_count']), reverse=True)
         return all_artifacts[:10]  # Limit for token efficiency
 
+    def _gather_rejection_context(self, query: str) -> list:
+        """
+        Gather rejection events matching a query (P8: Failure Metabolism).
+
+        Rejections provide valuable context about what was tried and
+        rejected, enabling learning from false starts.
+
+        Returns list of rejection data dicts with original proposal and reason.
+        """
+        rejections = []
+        query_tokens = self._tokenize(query)
+
+        if not query_tokens:
+            return rejections
+
+        # Get all rejection events
+        rejection_events = self.events.read_by_type(EventType.PROPOSAL_REJECTED)
+        if not rejection_events:
+            return rejections
+
+        # Get all proposed events to look up original content
+        proposed_events = self.events.read_by_type(EventType.STRUCTURE_PROPOSED)
+        proposed_by_id = {e.id: e for e in proposed_events}
+
+        for rejection in rejection_events:
+            proposal_id = rejection.data.get('proposal_id', '')
+            reason = rejection.data.get('reason', 'No reason provided')
+            rejection_date = rejection.timestamp[:10] if rejection.timestamp else 'Unknown'
+
+            # Get original proposal
+            original = proposed_by_id.get(proposal_id)
+            if original:
+                content = original.data.get('proposed', {})
+                artifact_type = content.get('type', 'unknown')
+                summary = content.get('summary', 'No summary')
+            else:
+                artifact_type = 'unknown'
+                summary = 'Original proposal not found'
+
+            # Check if query matches rejection content
+            rejection_text = f"{summary} {reason}"
+            rejection_tokens = self._tokenize(rejection_text)
+            overlap = len(query_tokens & rejection_tokens)
+
+            if overlap > 0:
+                rejections.append({
+                    'proposal_id': self._cli.codec.encode(proposal_id) if proposal_id else '',
+                    'type': artifact_type,
+                    'summary': summary,
+                    'reason': reason,
+                    'date': rejection_date,
+                    'score': overlap
+                })
+
+        # Sort by relevance
+        rejections.sort(key=lambda x: x['score'], reverse=True)
+        return rejections[:5]  # Limit for token efficiency
+
+    # -------------------------------------------------------------------------
+    # Symbol Context Gathering (Phase 2: Code Symbol Integration)
+    # -------------------------------------------------------------------------
+
+    def _get_symbol_store(self) -> CodeSymbolStore:
+        """Get or create CodeSymbolStore instance (lazy initialization)."""
+        if not hasattr(self, '_symbol_store'):
+            self._symbol_store = CodeSymbolStore(
+                babel_dir=self.babel_dir,
+                events=self.events,
+                graph=self.graph,
+                project_dir=self.project_dir
+            )
+        return self._symbol_store
+
+    def _gather_symbol_context(self, query: str) -> list:
+        """
+        Gather relevant code symbols for a why query.
+
+        Queries the CodeSymbolStore for symbols matching the query keywords.
+        Returns code locations to complement decision context.
+
+        Args:
+            query: The why query string
+
+        Returns:
+            List of symbol data dicts with file_path, line_start, signature, etc.
+        """
+        symbols_found = []
+        query_tokens = self._tokenize(query)
+
+        if not query_tokens:
+            return symbols_found
+
+        store = self._get_symbol_store()
+
+        # Query each token as potential symbol name
+        seen_qnames = set()  # Avoid duplicates
+        for token in query_tokens:
+            # Skip very short tokens (likely noise)
+            if len(token) < 3:
+                continue
+
+            # Query symbol store
+            matches = store.query(token)
+            for sym in matches:
+                if sym.qualified_name in seen_qnames:
+                    continue
+                seen_qnames.add(sym.qualified_name)
+
+                # Score based on name match quality
+                name_lower = sym.name.lower()
+                if name_lower == token:
+                    score = 2.0  # Exact match
+                elif token in name_lower:
+                    score = 1.5  # Partial match in name
+                else:
+                    score = 1.0  # Match in qualified name
+
+                symbols_found.append({
+                    'symbol': sym,
+                    'name': sym.name,
+                    'qualified_name': sym.qualified_name,
+                    'symbol_type': sym.symbol_type,
+                    'file_path': sym.file_path,
+                    'line_start': sym.line_start,
+                    'line_end': sym.line_end,
+                    'signature': sym.signature,
+                    'docstring': sym.docstring,
+                    'score': score
+                })
+
+        # Also search graph for code_symbol nodes directly
+        code_symbol_nodes = self.graph.get_nodes_by_type('code_symbol')
+        for node in code_symbol_nodes:
+            content = node.content
+            node_name = content.get('name', '').lower()
+            qname = content.get('qualified_name', '')
+
+            if qname in seen_qnames:
+                continue
+
+            # Check for token match
+            name_tokens = self._tokenize(node_name)
+            qname_tokens = self._tokenize(qname)
+            overlap = len(query_tokens & (name_tokens | qname_tokens))
+
+            if overlap > 0:
+                seen_qnames.add(qname)
+                symbols_found.append({
+                    'symbol': None,  # No Symbol object, data from graph
+                    'name': content.get('name', ''),
+                    'qualified_name': qname,
+                    'symbol_type': content.get('symbol_type', ''),
+                    'file_path': content.get('file_path', ''),
+                    'line_start': content.get('line_start', 0),
+                    'line_end': content.get('line_end', 0),
+                    'signature': content.get('signature', ''),
+                    'docstring': content.get('docstring', ''),
+                    'score': overlap * 0.8  # Slightly lower score for graph-only matches
+                })
+
+        # Sort by score and limit
+        symbols_found.sort(key=lambda x: x['score'], reverse=True)
+        return symbols_found[:5]  # Limit for token efficiency
+
     def _build_artifact_data(
         self,
         node,
@@ -247,7 +425,7 @@ class WhyCommand(BaseCommand):
             via_relation: Edge type if traversal (e.g., 'supports', 'evolves_from')
             via_artifact: Source artifact ID if traversal
         """
-        short = node.event_id[:8] if node.event_id else node.id.split('_', 1)[-1][:8]
+        short = self._cli.codec.encode(node.id)
 
         incoming = self.graph.get_incoming(node.id)
         outgoing = self.graph.get_outgoing(node.id)
@@ -260,18 +438,18 @@ class WhyCommand(BaseCommand):
         # Collect relationship details for context
         relationships = []
         for edge, target in outgoing:
-            target_short = target.event_id[:8] if target.event_id else target.id.split('_', 1)[-1][:8]
+            target_alias = self._cli.codec.encode(target.id)
             relationships.append({
                 'relation': edge.relation,
-                'target_id': target_short,
+                'target_id': target_alias,
                 'target_type': target.type,
                 'target_summary': target.content.get('summary', '')[:50]
             })
         for edge, source in incoming:
-            source_short = source.event_id[:8] if source.event_id else source.id.split('_', 1)[-1][:8]
+            source_alias = self._cli.codec.encode(source.id)
             relationships.append({
                 'relation': f"has_{edge.relation}",  # Reverse direction indicator
-                'target_id': source_short,
+                'target_id': source_alias,
                 'target_type': source.type,
                 'target_summary': source.content.get('summary', '')[:50]
             })
@@ -294,28 +472,31 @@ class WhyCommand(BaseCommand):
             'relationships': relationships[:5]  # Limit to top 5 relationships
         }
 
-    def _synthesized(self, query: str, artifacts: list):
+    def _synthesized(self, query: str, artifacts: list, rejections: list = None, code_symbols: list = None):
         """Use LLM to synthesize explanation (with caching)."""
         symbols = self.symbols
+        rejections = rejections or []
+        code_symbols = code_symbols or []
 
-        # Check cache first
-        cached = self._get_cached(query)
-        if cached:
-            print(f"{symbols.llm_done} (cached)\n")
-            # Layer 2 (Encoding): Use safe_print for LLM-generated content
-            safe_print(f"{query.capitalize()} in this project:\n")
-            safe_print(f"  {cached}\n")
-            # Show sources with IDs for traceability
-            source_types = {}
-            source_ids = []
-            for a in artifacts:
-                t = a['type']
-                source_types[t] = source_types.get(t, 0) + 1
-                source_ids.append(f"[{a['short_id']}]")
-            sources_summary = ", ".join(f"{v} {k}{'s' if v > 1 else ''}" for k, v in source_types.items())
-            print(f"  Sources: {sources_summary}")
-            print(f"  IDs: {' '.join(source_ids[:10])}")
-            return
+        # Check cache first (only if no rejections or code_symbols - they add context)
+        if not rejections and not code_symbols:
+            cached = self._get_cached(query)
+            if cached:
+                print(f"{symbols.llm_done} (cached)\n")
+                # Layer 2 (Encoding): Use safe_print for LLM-generated content
+                safe_print(f"{query.capitalize()} in this project:\n")
+                safe_print(f"  {cached}\n")
+                # Show sources with IDs for traceability
+                source_types = {}
+                source_ids = []
+                for a in artifacts:
+                    t = a['type']
+                    source_types[t] = source_types.get(t, 0) + 1
+                    source_ids.append(f"[{a['short_id']}]")
+                sources_summary = ", ".join(f"{v} {k}{'s' if v > 1 else ''}" for k, v in source_types.items())
+                print(f"  Sources: {sources_summary}")
+                print(f"  IDs: {' '.join(source_ids[:10])}")
+                return
 
         print(f"{symbols.llm_thinking} Thinking...", end="", flush=True)
 
@@ -357,7 +538,30 @@ class WhyCommand(BaseCommand):
                 if spec_parts:
                     context_parts.append(f"  SPEC: {'; '.join(spec_parts)}")
 
+        # Add rejection context (P8: Failure Metabolism)
+        rejection_parts = []
+        for r in rejections:
+            rejection_parts.append(
+                f"[{r['proposal_id']}] REJECTED {r['type'].upper()}: \"{r['summary']}\" — REASON: {r['reason']}"
+            )
+
+        # Add code symbol context (Phase 2: code locations)
+        symbol_parts = []
+        for s in code_symbols:
+            location = f"{s['file_path']}:{s['line_start']}"
+            if s['line_end'] != s['line_start']:
+                location += f"-{s['line_end']}"
+            type_label = s['symbol_type'].upper()
+            part = f"[CODE] {type_label} {s['name']} @ {location}"
+            if s['signature']:
+                part += f"\n  Signature: {s['signature']}"
+            if s['docstring']:
+                part += f"\n  Purpose: \"{s['docstring'][:100]}\""
+            symbol_parts.append(part)
+
         context = "\n".join(context_parts)
+        rejection_context = "\n".join(rejection_parts) if rejection_parts else ""
+        symbol_context = "\n".join(symbol_parts) if symbol_parts else ""
 
         system_prompt = """You explain project decisions by synthesizing artifacts into clear understanding.
 
@@ -366,6 +570,8 @@ ARTIFACT TYPES (what they mean):
 - DECISION: A choice made - use these to explain how/what was done
 - CONSTRAINT: A limit/rule - use these to explain boundaries
 - PRINCIPLE: A guiding rule - use these to explain philosophy
+- REJECTED: A proposal that was rejected - explain what was tried and why it failed (P8: learn from failures)
+- CODE: A code symbol (class, function, method) - shows WHERE implementation exists
 
 RELATIONSHIPS (what they mean):
 - "supports" = enables or implements
@@ -377,18 +583,31 @@ PRIORITIZATION:
 1. Start with PURPOSE to explain WHY
 2. Use DECISIONs to explain HOW/WHAT
 3. Reference CONSTRAINTs for boundaries
-4. Cite traversal hits to show connections
+4. Mention REJECTIONs if relevant (what was tried and failed)
+5. Cite traversal hits to show connections
+6. Reference CODE symbols to show where implementation lives (file:line format)
 
-CITATION: Always cite sources as [id] when referencing specific artifacts.
+CITATION: Always cite sources as [id] when referencing specific artifacts. For code, mention file:line.
 
 OUTPUT: Plain text only, no markdown. Length should match complexity - simple topics need fewer sentences, complex topics may need more."""
 
-        user_prompt = f"""Question: "{query}"
+        # Build user prompt with optional rejection and symbol context
+        user_prompt_parts = [f'Question: "{query}"', "", "Artifacts found:", context]
 
-Artifacts found:
-{context}
+        if rejection_context:
+            user_prompt_parts.extend(["", "Rejected proposals (P8: learn from what didn't work):", rejection_context])
 
-Synthesize these into an explanation. Lead with WHY (from purposes), then HOW (from decisions). Cite [id] for each claim."""
+        if symbol_context:
+            user_prompt_parts.extend(["", "Related code locations:", symbol_context])
+
+        user_prompt_parts.extend([
+            "",
+            "Synthesize these into an explanation. Lead with WHY (from purposes), then HOW (from decisions).",
+            "If relevant, mention what was rejected and why. Reference code locations for implementation details.",
+            "Cite [id] for each claim."
+        ])
+
+        user_prompt = "\n".join(user_prompt_parts)
 
         try:
             response = self.provider.complete(system_prompt, user_prompt, max_tokens=500)
@@ -415,6 +634,16 @@ Synthesize these into an explanation. Lead with WHY (from purposes), then HOW (f
                 source_types[t] = source_types.get(t, 0) + 1
                 source_ids.append(f"[{a['short_id']}]")
 
+            # Include rejections in source count (P8: Failure Metabolism)
+            if rejections:
+                source_types['rejection'] = len(rejections)
+                for r in rejections:
+                    source_ids.append(f"[{r['proposal_id']}]")
+
+            # Include code symbols in source count (Phase 2)
+            if code_symbols:
+                source_types['code_symbol'] = len(code_symbols)
+
             sources_summary = ", ".join(f"{v} {k}{'s' if v > 1 else ''}" for k, v in source_types.items())
             print(f"  Sources: {sources_summary}")
             print(f"  IDs: {' '.join(source_ids[:10])}")  # Show up to 10 IDs for actionability
@@ -422,11 +651,13 @@ Synthesize these into an explanation. Lead with WHY (from purposes), then HOW (f
         except Exception as e:
             print(f"\r{symbols.llm_done} Error\n")
             # Fall back to listing
-            self._fallback(query, artifacts)
+            self._fallback(query, artifacts, rejections, code_symbols)
 
-    def _fallback(self, query: str, artifacts: list):
+    def _fallback(self, query: str, artifacts: list, rejections: list = None, code_symbols: list = None):
         """Fallback: list artifacts when no LLM available."""
         symbols = self.symbols
+        rejections = rejections or []
+        code_symbols = code_symbols or []
         print(f"\n{query.capitalize()}:\n")
 
         for a in artifacts[:5]:
@@ -456,6 +687,34 @@ Synthesize these into an explanation. Lead with WHY (from purposes), then HOW (f
             for spec in a.get('specs', []):
                 if spec.get('objective'):
                     print(f"    {symbols.arrow} Spec: {spec['objective'][:50]}...")
+
+        # Show rejections (P8: Failure Metabolism)
+        if rejections:
+            print(f"\nRejected proposals (P8: learn from failures):\n")
+            for r in rejections[:3]:
+                safe_print(f"  [{r['proposal_id']}] REJECTED {r['type'].upper()}: {r['summary'][:40]}...")
+                safe_print(f"    REASON: {r['reason'][:60]}...")
+
+        # Show code symbols (Phase 2: code locations)
+        if code_symbols:
+            print(f"\nRelated code:\n")
+            for s in code_symbols[:5]:
+                type_icon = {
+                    'class': 'C',
+                    'function': 'F',
+                    'method': 'M',
+                    'module': 'mod'
+                }.get(s['symbol_type'], '?')
+
+                location = f"{s['file_path']}:{s['line_start']}"
+                if s['line_end'] != s['line_start']:
+                    location += f"-{s['line_end']}"
+
+                safe_print(f"  [{type_icon}] {s['name']} @ {location}")
+                if s['signature']:
+                    safe_print(f"      {s['signature'][:60]}")
+                if s['docstring']:
+                    safe_print(f"      \"{s['docstring'][:50]}...\"")
 
         print(f"\n  (Configure LLM for full explanation)")
 
@@ -524,7 +783,7 @@ Synthesize these into an explanation. Lead with WHY (from purposes), then HOW (f
                 decision_summary = decision_node.content.get('summary', '')
                 decision_type = decision_node.type
 
-                safe_print(f"  [{link.decision_id[:8]}] {decision_type.upper()}")
+                safe_print(f"  {self._cli.format_id(link.decision_id)} {decision_type.upper()}")
                 safe_print(f"    \"{decision_summary}\"")
 
                 # Show why this decision was made (purpose link)
@@ -535,7 +794,7 @@ Synthesize these into an explanation. Lead with WHY (from purposes), then HOW (f
                         print(f"    {symbols.arrow} Purpose: \"{purpose_summary}\"")
                         break
             else:
-                print(f"  [{link.decision_id[:8]}] (decision not found in graph)")
+                print(f"  {self._cli.format_id(link.decision_id)} (decision not found in graph)")
 
             print(f"    Linked by: {link.linked_by}")
             print()
@@ -577,13 +836,36 @@ Synthesize these into an explanation. Lead with WHY (from purposes), then HOW (f
                 content_str = str(node.content).lower()
                 overlap = len(message_words & set(content_str.split()))
                 if overlap > 0:
-                    short_id = node.event_id[:8] if node.event_id else node.id.split('_', 1)[-1][:8]
+                    alias = self._cli.codec.encode(node.id)
                     suggestions.append({
                         'node': node,
-                        'short_id': short_id,
+                        'short_id': alias,
                         'summary': node.content.get('summary', ''),
                         'score': overlap
                     })
 
         suggestions.sort(key=lambda x: x['score'], reverse=True)
         return suggestions
+
+
+# =============================================================================
+# Command Registration (Self-Registration Pattern)
+# =============================================================================
+
+def register_parser(subparsers):
+    """Register why command parser."""
+    p = subparsers.add_parser('why', help='Ask why something is the way it is')
+    p.add_argument('query', nargs='?', help='What do you want to understand?')
+    p.add_argument('--commit', help='Query why a specific commit was made (shows linked decisions)')
+    return p
+
+
+def handle(cli, args):
+    """Handle why command dispatch."""
+    if args.commit:
+        cli._why_cmd.why_commit(args.commit)
+    elif args.query:
+        cli._why_cmd.why(args.query)
+    else:
+        print('Usage: babel why "topic"           (query decisions)')
+        print('       babel why --commit <sha>    (why was this commit made?)')

@@ -1,0 +1,268 @@
+name: validate
+category: validation
+description: Process pending proposals. Human review and approval of AI-captured artifacts. This is USER's action — AI reminds and links after acceptance.
+trigger: User says "review proposals", "what's pending", "let me check captures", periodically remind user of pending queue, after AI has queued several captures
+
+commands:
+  # View pending
+  - babel review                              # See pending (interactive for user)
+  - babel review --list                       # List pending (AI-safe)
+  # Accept
+  - babel review --accept <id>                # Accept specific
+  - babel review --accept-all                 # Accept all pending
+  # Reject
+  - babel review --reject <id>                # Reject with default reason
+  - 'babel review --reject <id> --reason "..."' # Reject with explanation (P8)
+  # Extensions
+  - babel review --rejected                   # List rejected (lessons learned)
+  - babel review --synthesize                 # AI clusters into themes
+  - babel review --accept-theme <name>        # Accept all in theme
+  # After acceptance (AI's action)
+  - babel link <id>                           # Connect to purpose (IMMEDIATELY)
+
+principles:
+  - HC2 (Human Authority) - Human validates before proposals become artifacts
+  - P5 (Dual-Test Truth) - Review is first step toward validation
+
+uses_context:
+  - Pending proposal queue
+  - Constraint keywords (for requires_negotiation check)
+
+produces:
+  - Accepted artifacts (promoted from proposals)
+  - Linked artifacts (connected to purpose via connect skill)
+  - Rejection records (if rejected)
+
+composable_with:
+  - remember (creates proposals that validate reviews)
+  - connect (link after acceptance)
+  - strengthen (endorse/evidence after validation)
+  - batch (validate is user-side of batch workflow)
+
+always_load: false
+load_on_demand: true
+user_invocable: true
+
+examples:
+  - |
+    ## FLOW 5: VALIDATE — User Reviews Batch
+
+    **CRITICAL:** This is USER's action, not AI's.
+
+    | Role | Action | Command |
+    |------|--------|---------|
+    | **AI** | Capture with --batch | `babel capture "..." --batch` |
+    | **AI** | Remind periodically | "You have N pending..." |
+    | **USER** | Review pending | `babel review` |
+    | **USER** | Accept/reject | `babel review --accept <id>` |
+    | **AI** | Link immediately | `babel link <id>` |
+
+  - |
+    ### The Split: User's Job vs AI's Job
+
+    **User's Job:**
+
+    | Action | Command |
+    |--------|---------|
+    | Review pending | `babel review` |
+    | Accept all | `babel review --accept-all` |
+    | Accept specific | `babel review --accept <id>` |
+    | Reject | `babel review --reject <id>` |
+
+    **AI's Job:**
+
+    | Action | How |
+    |--------|-----|
+    | Capture with --batch | Always use `--batch` (see batch protocol) |
+    | Remind periodically | "You have N pending proposals. Review with: `babel review`" |
+    | Link after acceptance | `babel link <id>` (IMMEDIATELY after user accepts) |
+    | Never auto-confirm | AI captures, USER validates |
+
+  - |
+    ### Command Reference
+
+    ```bash
+    # VIEW PENDING
+    babel review              # Interactive view (for user)
+    babel review --list       # List pending (AI-safe)
+
+    # ACCEPT
+    babel review --accept <id>    # Accept specific proposal
+    babel review --accept-all     # Accept all pending
+
+    # REJECT
+    babel review --reject <id>                        # Reject with default reason
+    babel review --reject <id> --reason "Explanation" # Reject with P8 traceability
+
+    # EXTENSIONS
+    babel review --rejected         # List rejected proposals
+    babel review --synthesize       # AI clusters into themes
+    babel review --accept-theme X   # Accept all in theme X
+    ```
+
+  - |
+    ### AI Behavior
+
+    **DO:**
+    - Use `--list` to show what's pending (AI-safe)
+    - Remind user periodically
+    - Link IMMEDIATELY after user accepts
+
+    **DON'T:**
+    - Run `babel review` interactively (causes EOF)
+    - Auto-confirm proposals (violates HC2)
+    - Forget to link after acceptance
+
+  - |
+    ### Reminder Pattern
+
+    **Frequency:** Every few exchanges, not every message.
+
+    **Format:**
+    ```
+    "You have 5 pending proposals. Review with: `babel review`"
+    ```
+
+    **Consequence of not reminding:**
+    Queue grows stale → nothing validated → decisions remain unconfirmed.
+
+  - |
+    ### After Review Sequence
+
+    **CRITICAL:** Link IMMEDIATELY after user accepts.
+
+    ```bash
+    # User runs:
+    babel review --accept <id>
+
+    # You run (immediately!):
+    babel link <id>
+    ```
+
+    **Without linking:**
+    - Artifacts are orphans
+    - Can't inform `babel why` queries
+    - Graph connectivity breaks
+
+  - |
+    ### Rejection Workflow
+
+    ```bash
+    # Reject with default reason
+    babel review --reject <id>
+
+    # Reject with explanation (P8 traceability)
+    babel review --reject <id> --reason "Superseded by newer approach"
+
+    # List rejected proposals (lessons learned)
+    babel review --rejected
+    ```
+
+    **Why explicit reason?** P8 (Evolution Traceable) — rejection decisions are decisions too.
+
+  - |
+    ### Synthesis Workflow
+
+    When queue is large, AI can help organize:
+
+    ```bash
+    # AI clusters pending proposals into themes
+    babel review --synthesize
+    # Output: "caching" (3 proposals), "auth" (2 proposals), etc.
+
+    # Accept all proposals in a theme
+    babel review --accept-theme "caching"
+    # → Accepts all 3 caching proposals at once
+    ```
+
+    **Useful when:** Many proposals accumulated, user wants bulk review.
+
+  - |
+    ### requires_negotiation Warning
+
+    When accepting artifacts that touch constraints:
+
+    ```bash
+    babel review --accept abc123
+    # If artifact keywords overlap with constraint keywords:
+    #   ⚠️  requires_negotiation: This artifact touches constrained areas
+    #   Overlapping constraints: [constraint_id] constraint summary
+    #   HC2: Proceeding — human decides timing of negotiation
+    ```
+
+    **HC2 compliant:** System warns but proceeds. See `tension` skill for details.
+
+  - |
+    ### Connection to Batch Protocol
+
+    VALIDATE is the USER side of the batch workflow:
+
+    ```
+    1. AI captures with --batch     (see batch protocol)
+    2. User validates with review   (this skill)
+    3. AI links after acceptance    (see connect skill)
+    ```
+
+    **Lifecycle:**
+    ```
+    capture --batch → [pending] → review --accept → link
+    ```
+
+  - |
+    ### Connection to Other Flows
+
+    | Flow | Connection |
+    |------|------------|
+    | **REMEMBER** | Creates proposals that validate reviews |
+    | **CONNECT** | Link after acceptance |
+    | **STRENGTHEN** | Endorse/evidence after validation |
+    | **TENSION** | requires_negotiation warnings |
+
+  - |
+    ### Common Mistakes
+
+    | Mistake | Why It's Wrong | Fix |
+    |---------|----------------|-----|
+    | AI runs `babel review` | Interactive, causes EOF | Use `--list`, `--accept <id>` |
+    | AI auto-confirms | Violates HC2 | USER validates |
+    | Forget to link after accept | Artifacts orphaned | `babel link <id>` immediately |
+    | Never remind user | Queue grows stale | Remind every few exchanges |
+    | Reject without reason | P8 violated | Use `--reason` for traceability |
+
+  - |
+    ### Consequence of Skipping
+
+    | Skip | Result |
+    |------|--------|
+    | Skip review | Proposals pile up, nothing validated |
+    | Skip linking | Artifacts orphaned, can't inform `why` |
+    | Skip reminders | User forgets, queue stale |
+    | Skip rejection reason | No record of why rejected (P8) |
+
+    **Rule:** Proposals pile up, nothing gets validated, decisions remain unconfirmed.
+
+  - |
+    ### The Rule (Summary)
+
+    ```
+    CRITICAL: This is USER's action, not AI's
+
+    USER:
+      babel review              # See pending
+      babel review --accept <id> # Accept
+      babel review --reject <id> # Reject
+
+    AI:
+      babel capture "..." --batch  # Capture (with batch!)
+      "You have N pending..."      # Remind
+      babel link <id>              # Link (after accept!)
+
+    SEQUENCE:
+      User: babel review --accept <id>
+      AI:   babel link <id>  (IMMEDIATELY!)
+
+    HC2: Human validates. AI captures and links.
+    ```
+
+    **User reviews. AI links. Never the reverse.**
+

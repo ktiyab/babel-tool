@@ -1,0 +1,36 @@
+name: dependency-audit
+category: analyze
+description: Dependency review with upgrade priority - assess necessity and maintenance burden relative to purpose
+trigger: Dependency review needed, "check dependencies", "upgrade priority", maintenance planning
+
+commands:
+  - babel scan --type dependencies
+  - babel scan --type dependencies --deep
+
+principles:
+  - P3 (Expertise-Weighted)
+  - P7 (Reasoning Travels)
+
+uses_context:
+  - Project purpose
+  - Decisions about why each dependency was chosen
+  - Constraints
+
+produces:
+  - Dependency necessity assessment
+  - Maintenance burden vs value
+  - Security update priority
+  - Bundle size impact
+  - Upgrade paths
+
+composable_with:
+  - recall
+
+always_load: false
+load_on_demand: true
+user_invocable: true
+
+# Context-aware analysis:
+# References WHY each dependency was chosen
+# Suggests removals only if purpose allows
+# Prioritizes upgrades based on project needs

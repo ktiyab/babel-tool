@@ -1,0 +1,139 @@
+name: connect
+category: knowledge
+description: Link artifacts to purpose or evolution chain. IMMEDIATELY after acceptance to enable babel why queries. Also used for evolves_from linking after revisions.
+
+trigger: After user accepts proposal via babel review --accept, after babel resolve --outcome revised, after artifact creation needing graph connection, user asks "connect this" or "link to purpose", babel list --orphans shows disconnected artifacts
+
+commands:
+  - babel link <id>
+  - 'babel link <artifact_id> <purpose_id>'
+  - 'babel link <new_id> <old_id>'
+  - babel list --orphans
+
+principles:
+  - P7 (Reasoning Travels) - Decisions must connect to context
+  - P8 (Evolution Traceable) - Supersession chain must be explicit
+
+uses_context:
+  - Accepted artifact ID from review
+  - Purpose or parent artifact to link to
+  - Parent artifact ID after resolve --outcome revised
+
+produces:
+  - Connected artifact in graph
+  - Artifact can now inform babel why queries
+  - Evolution chain when linking after revision
+
+composable_with:
+  - remember (capture → review → link)
+  - validate (review --accept → link)
+  - revise (resolve --outcome revised → link evolves_from)
+  - tension (resolve → evolves_from link if revised)
+
+always_load: false
+load_on_demand: true
+user_invocable: true
+
+examples:
+  - |
+    ## FLOW 6: CONNECT — Link Decisions to Purpose
+
+    Link artifacts to enable `babel why` queries and maintain graph connectivity.
+
+    ### Why This Matters
+
+    | Without Linking | With Linking |
+    |-----------------|--------------|
+    | Artifacts are isolated islands | Artifacts inform `babel why` queries |
+    | Graph connectivity breaks | Knowledge graph enables cross-referencing |
+    | P8 violated (no evolution chain) | History traceable through links |
+
+  - |
+    ### Command Reference
+
+    ```bash
+    # Link to inferred purpose (most common)
+    babel link <id>
+
+    # Explicit link to specific purpose
+    babel link <artifact_id> <purpose_id>
+
+    # Evolves_from link after revision (P8)
+    babel link <new_id> <old_id>
+
+    # Find artifacts needing connection
+    babel list --orphans
+    ```
+
+  - |
+    ### Does NOT Cover (See Other Skills)
+
+    | Command | Skill |
+    |---------|-------|
+    | `babel link <id> --to-commit <sha>` | /git-babel |
+    | `babel link --commits` | /git-babel |
+
+    For decision-to-commit linking, use the `/git-babel` skill.
+
+  - |
+    ### Sequence After Review
+
+    ```bash
+    # User accepts proposal
+    babel review --accept <id>
+
+    # AI IMMEDIATELY links (don't wait or batch)
+    babel link <id>
+    ```
+
+    **Key behavior:** This is AI's action AFTER user accepts. Link immediately, not "later".
+
+  - |
+    ### Sequence After Revision (P8: Evolution Chain)
+
+    ```bash
+    # Resolve with revised outcome
+    babel resolve <id> --outcome revised --force --resolution "Updated approach"
+
+    # System hints: P8: Evolution link available from [parent_id]
+
+    # Create evolves_from link
+    babel link <new_artifact_id> <parent_id>
+    ```
+
+    This maintains the supersession chain required by P8 (Evolution Traceable).
+
+  - |
+    ### Finding and Connecting Orphans
+
+    ```bash
+    # Find artifacts with no incoming connections
+    babel list --orphans
+
+    # Output example:
+    # ⚠ Orphaned artifacts (6):
+    #   [abc123] Decision: Use Redis for caching
+    #   [def456] Constraint: Max 100MB storage
+
+    # Link each to appropriate purpose
+    babel link abc123
+    babel link def456 <purpose_id>
+    ```
+
+  - |
+    ### Composition Patterns
+
+    | Workflow | Skill Sequence | Link Type |
+    |----------|---------------|-----------|
+    | Decision capture | /remember → /validate → /connect | Purpose link |
+    | Challenge resolution | /challenge → /revise → /connect | evolves_from |
+    | Tension resolution | /tension → /connect | evolves_from if revised |
+
+  - |
+    ### Without Linking (What Breaks)
+
+    - `babel why "topic"` misses relevant context
+    - Artifacts are invisible to semantic queries
+    - Evolution history breaks (P8 violated)
+    - Orphan count grows, graph becomes fragmented
+    - Knowledge graph loses coherence value

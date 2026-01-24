@@ -40,7 +40,7 @@ class MemoCommand(BaseCommand):
 
         init_marker = f" {symbols.purpose} INIT" if memo.init else ""
         print(f"\n{symbols.check_pass} Memo saved:{init_marker}")
-        print(f"  [{memo.id}] {memo.content}")
+        print(f"  {self._cli.format_id(memo.id)} {memo.content}")
 
         if memo.contexts:
             print(f"  Contexts: {', '.join(memo.contexts)}")
@@ -52,6 +52,10 @@ class MemoCommand(BaseCommand):
         else:
             print(f"\nThis will be surfaced in relevant contexts.")
         print(f"Manage memos: babel memo --list")
+
+        # Succession hint (centralized)
+        from ..output import end_command
+        end_command("memo", {})
 
     def remove(self, memo_id: str):
         """
@@ -70,7 +74,11 @@ class MemoCommand(BaseCommand):
 
         if self._cli.memos.remove(memo_id):
             print(f"\n{symbols.check_pass} Memo removed:")
-            print(f"  [{memo.id}] {memo.content}")
+            print(f"  {self._cli.format_id(memo.id)} {memo.content}")
+
+            # Succession hint (centralized)
+            from ..output import end_command
+            end_command("memo", {})
         else:
             print(f"\nFailed to remove memo: {memo_id}")
 
@@ -94,7 +102,7 @@ class MemoCommand(BaseCommand):
 
         if memo:
             print(f"\n{symbols.check_pass} Memo updated:")
-            print(f"  [{memo.id}] {memo.content}")
+            print(f"  {self._cli.format_id(memo.id)} {memo.content}")
             if memo.contexts:
                 print(f"  Contexts: {', '.join(memo.contexts)}")
         else:
@@ -141,13 +149,17 @@ class MemoCommand(BaseCommand):
             use_info = f"(used {memo.use_count}x)" if memo.use_count > 0 else ""
             init_marker = f"{symbols.purpose} INIT " if memo.init else ""
 
-            safe_print(f"  {init_marker}[{memo.id}] {content_display}")
+            safe_print(f"  {init_marker}{self._cli.format_id(memo.id)} {content_display}")
             print(f"           {ctx_display} {use_info}")
 
         print()
         print(f"Add: babel memo \"instruction\"")
         print(f"Add init: babel memo \"instruction\" --init")
         print(f"Remove: babel memo --remove <id>")
+
+        # Succession hint (centralized)
+        from ..output import end_command
+        end_command("memo", {})
 
     def set_init(self, memo_id: str, is_init: bool):
         """
@@ -170,11 +182,11 @@ class MemoCommand(BaseCommand):
         if updated:
             if is_init:
                 print(f"\n{symbols.check_pass} Memo promoted to init:")
-                print(f"  {symbols.purpose} [{updated.id}] {updated.content}")
+                print(f"  {symbols.purpose} {self._cli.format_id(updated.id)} {updated.content}")
                 print(f"\nThis will now surface at session start via 'babel status'.")
             else:
                 print(f"\n{symbols.check_pass} Memo demoted from init:")
-                print(f"  [{updated.id}] {updated.content}")
+                print(f"  {self._cli.format_id(updated.id)} {updated.content}")
                 print(f"\nThis will no longer surface at session start.")
         else:
             print(f"\nFailed to update memo: {memo_id}")
@@ -228,7 +240,7 @@ class MemoCommand(BaseCommand):
             for cand in pending:
                 content_display = truncate(cand.content, SUMMARY_LENGTH - 20)
                 ctx_display = f"[{', '.join(cand.contexts[:3])}]" if cand.contexts else ""
-                safe_print(f"  [{cand.id}] {content_display}")
+                safe_print(f"  {self._cli.format_id(cand.id)} {content_display}")
                 print(f"           Seen {cand.count}x in {len(cand.sessions)} session(s) {ctx_display}")
             print()
             print(f"  {symbols.arrow} Promote: babel memo --promote <id>")
@@ -242,7 +254,7 @@ class MemoCommand(BaseCommand):
             for cand in other:
                 status = "(dismissed)" if cand.status == "dismissed" else ""
                 content_display = truncate(cand.content, SUMMARY_LENGTH - 20)
-                safe_print(f"  [{cand.id}] {content_display} {status}")
+                safe_print(f"  {self._cli.format_id(cand.id)} {content_display} {status}")
                 print(f"           Seen {cand.count}x")
 
     def add_candidate(self, content: str, contexts: Optional[List[str]] = None):
@@ -275,27 +287,29 @@ class MemoCommand(BaseCommand):
         """
         symbols = self.symbols
 
-        # Find candidate first for display
+        # Find candidate using centralized resolve_id
         candidates = self._cli.memos.list_candidates()
-        candidate = None
-        for c in candidates:
-            if c.id.startswith(candidate_id):
-                candidate = c
-                break
+        candidate_ids = [c.id for c in candidates]
+        resolved_id = self._cli.resolve_id(candidate_id, candidate_ids, "candidate")
+        candidate = next((c for c in candidates if c.id == resolved_id), None) if resolved_id else None
 
         if not candidate:
             print(f"\nCandidate not found: {candidate_id}")
             print("See candidates: babel memo --candidates")
             return
 
-        memo = self._cli.memos.promote(candidate_id, contexts)
+        memo = self._cli.memos.promote(resolved_id, contexts)
 
         if memo:
             print(f"\n{symbols.check_pass} Promoted to memo:")
-            print(f"  [{memo.id}] {memo.content}")
+            print(f"  {self._cli.format_id(memo.id)} {memo.content}")
             if memo.contexts:
                 print(f"  Contexts: {', '.join(memo.contexts)}")
             print(f"\nThis will now surface automatically in relevant contexts.")
+
+            # Succession hint (centralized)
+            from ..output import end_command
+            end_command("memo", {})
         else:
             print(f"\nFailed to promote candidate: {candidate_id}")
 
@@ -311,6 +325,10 @@ class MemoCommand(BaseCommand):
         if self._cli.memos.dismiss(candidate_id):
             print(f"\n{symbols.check_pass} Candidate dismissed.")
             print("I won't suggest this pattern again.")
+
+            # Succession hint (centralized)
+            from ..output import end_command
+            end_command("memo", {})
         else:
             print(f"\nCandidate not found: {candidate_id}")
 
@@ -335,7 +353,7 @@ class MemoCommand(BaseCommand):
             content_display = truncate(cand.content, SUMMARY_LENGTH - 10)
             ctx_display = f"[{', '.join(cand.contexts[:3])}]" if cand.contexts else ""
 
-            safe_print(f"  [{cand.id}] \"{content_display}\"")
+            safe_print(f"  {self._cli.format_id(cand.id)} \"{content_display}\"")
             print(f"           Seen {cand.count}x {ctx_display}")
             print()
 
@@ -359,7 +377,7 @@ class MemoCommand(BaseCommand):
             memo = self._cli.memos.promote(cand.id)
             if memo:
                 promoted += 1
-                safe_print(f"  {symbols.check_pass} [{memo.id}] {truncate(memo.content, 50)}")
+                safe_print(f"  {symbols.check_pass} {self._cli.format_id(memo.id)} {truncate(memo.content, 50)}")
 
         print(f"\nPromoted {promoted} candidate(s) to memos.")
 
@@ -376,3 +394,74 @@ class MemoCommand(BaseCommand):
         print(f"  Total uses:         {stats['total_uses']}")
         print(f"  Pending candidates: {stats['candidates']}")
         print(f"  Ready to promote:   {stats['pending_suggestions']}")
+
+
+# =============================================================================
+# Command Registration (Self-Registration Pattern)
+# =============================================================================
+
+COMMAND_NAME = 'memo'
+
+
+def register_parser(subparsers):
+    """Register memo command parser."""
+    p = subparsers.add_parser('memo', help='Save persistent preferences (reduces repetition)')
+    p.add_argument('content', nargs='?', help='Memo content to save')
+    p.add_argument('--context', '-c', action='append', dest='contexts',
+                   help='Context where this applies (can repeat)')
+    p.add_argument('--init', '-i', action='store_true',
+                   help='Foundational instruction - surfaces at session start via status')
+    p.add_argument('--list', '-l', action='store_true', help='List all memos')
+    p.add_argument('--list-init', action='store_true', help='List only init memos')
+    p.add_argument('--remove', '-r', metavar='ID', help='Remove memo by ID')
+    p.add_argument('--update', '-u', metavar='ID', help='Update memo by ID')
+    p.add_argument('--promote-init', metavar='ID', help='Make memo foundational (init)')
+    p.add_argument('--demote-init', metavar='ID', help='Make memo regular (not init)')
+    p.add_argument('--candidates', action='store_true', help='Show AI-detected patterns')
+    p.add_argument('--promote', metavar='ID', help='Promote candidate to memo')
+    p.add_argument('--promote-all', action='store_true', help='Promote all pending candidates')
+    p.add_argument('--dismiss', metavar='ID', help='Dismiss a candidate')
+    p.add_argument('--suggest', action='store_true', help='Show pending promotion suggestions')
+    p.add_argument('--relevant', metavar='CONTEXT', help='Show memos relevant to context')
+    p.add_argument('--stats', action='store_true', help='Show memo statistics')
+    return p
+
+
+def handle(cli, args):
+    """Handle memo command dispatch."""
+    cmd = cli._memo_cmd
+    if args.list:
+        cmd.list_memos()
+    elif args.list_init:
+        cmd.list_memos(init_only=True)
+    elif args.remove:
+        cmd.remove(args.remove)
+    elif args.update:
+        cmd.update(args.update, args.content)
+    elif args.promote_init:
+        cmd.promote_init(args.promote_init)
+    elif args.demote_init:
+        cmd.demote_init(args.demote_init)
+    elif args.candidates:
+        cmd.show_candidates()
+    elif args.promote:
+        cmd.promote(args.promote)
+    elif args.promote_all:
+        cmd.promote_all()
+    elif args.dismiss:
+        cmd.dismiss(args.dismiss)
+    elif args.suggest:
+        cmd.suggest()
+    elif args.relevant:
+        cmd.show_relevant(args.relevant)
+    elif args.stats:
+        cmd.stats()
+    elif args.content:
+        cmd.add(args.content, contexts=args.contexts, init=args.init)
+    else:
+        print("Usage:")
+        print("  babel memo \"instruction\"             Save memo")
+        print("  babel memo \"text\" --init             Save as init memo")
+        print("  babel memo --list                    List memos")
+        print("  babel memo --list-init               List init memos")
+        print("  babel memo --remove <id>             Remove memo")

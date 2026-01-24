@@ -1,0 +1,304 @@
+name: start-new
+category: lifecycle
+description: Begin new task with proper context. Full lifecycle from orient through completion. Use when NO prior task state exists. Produces task + spec + completion captures in history. Never implement before spec is captured AND approved.
+
+trigger: User says "implement feature X" or "build component Y" or "add functionality Z", new work with no existing task captures, fresh implementation request
+
+commands:
+  # Phase 1: ORIENT (understand project state)
+  - babel status
+  - babel tensions
+  - babel questions
+  - 'babel status && babel tensions && babel questions'
+  # Phase 2: CONTEXT (query existing knowledge)
+  - 'babel why "relevant topic"'
+  - 'babel why "related topic"'
+  # Phase 3: PROPOSE (capture intent BEFORE implementing)
+  - 'babel capture "TASK X.Y: What and why" --batch'
+  - 'babel capture --spec <id> "OBJECTIVE:... ADD:... MODIFY:... REMOVE:... PRESERVE:... RELATED:... TEST:..." --batch'
+  - babel link <id>
+  # Phase 5: COMPLETE (after implementation)
+  - babel coherence
+  - 'babel capture "TASK X.Y COMPLETE: Summary" --batch'
+  - babel link <id> --to-commit HEAD
+  - babel share <id>
+
+principles:
+  - P1 (Bootstrap from Need) - Task emerges from actual requirement
+  - P7 (Reasoning Travels) - WHY captured at each stage
+  - P8 (Evolution Traceable) - Task linked to specs and commits
+  - HC2 (Human Authority) - Spec approved before implementation
+
+uses_context:
+  - Project purpose (from orient)
+  - Existing decisions on topic (from recall)
+  - Related constraints
+  - Init memos (foundational rules)
+
+produces:
+  - Task capture with ID (in history as "TASK X.Y: ...")
+  - Specification capture linked to task
+  - Completion capture (in history as "TASK X.Y COMPLETE: ...")
+  - Git-commit link (decision connected to code)
+  - Coherence verification
+
+composable_with:
+  - orient (Phase 1)
+  - recall (Phase 2)
+  - remember (Phase 3 - task capture)
+  - spec (Phase 3 - specification)
+  - connect (Phase 3 - linking)
+  - code-mod (Phase 4 - file changes)
+  - git-babel (Phase 5 - commit linking)
+
+always_load: false
+load_on_demand: true
+user_invocable: true
+
+examples:
+  - |
+    ## FLOW 15: TASK CONTINUITY — START NEW Mode
+
+    Full lifecycle for beginning new work when no prior task state exists.
+
+    **Distinguishing Factor:**
+    - START NEW: No prior task state exists → use this skill
+    - CONTINUE: Task state exists in history → use continue skill
+
+  - |
+    ### Task Naming Convention
+
+    **Format:** `TASK [Phase].[Number]: [Description]`
+
+    **Examples:**
+    - `TASK A.1: Setup project structure`
+    - `TASK B.2: Build ConstraintStatus component`
+    - `TASK C.3: Implement caching layer`
+
+    **Purpose:** Enables grep-based discovery via:
+    ```bash
+    babel history | grep TASK
+    ```
+
+  - |
+    ### Where Task State Lives
+
+    ```
+    WRONG ASSUMPTION: Tasks are stored as decisions or purposes
+    RIGHT REALITY:    Task progress lives in babel history as captures
+
+    Pattern in history:
+      ○ [92c8119d] Captured: "TASK A.2 COMPLETE: Tailwind CSS v4..."
+      ○ [0cb923b8] Captured: "TASK A.3 COMPLETE: shadcn/ui..."
+      ● [8af2ae52] Captured: "TASK B.1: Build PrincipleHealthBar..."
+    ```
+
+    - Items with `COMPLETE` = done, don't repeat
+    - Items without `COMPLETE` = in progress or next
+
+  - |
+    ### Phase 1: ORIENT (Understand Project State)
+
+    ```bash
+    babel status && babel tensions && babel questions
+    ```
+
+    **Before anything else, know:**
+    - Project purpose (from status)
+    - Init memos (foundational rules)
+    - Open tensions (contested decisions)
+    - Unresolved questions (acknowledged unknowns)
+
+    See `/orient` skill for details.
+
+  - |
+    ### Phase 2: CONTEXT (Query Existing Knowledge)
+
+    ```bash
+    babel why "relevant topic"
+    babel why "related topic"
+    ```
+
+    **Multi-query pattern:** Always check topic AND adjacent areas.
+
+    | Query Type | Example | Why |
+    |------------|---------|-----|
+    | Primary | `babel why "caching"` | Direct topic |
+    | Related | `babel why "performance"` | Adjacent constraint |
+    | Adjacent | `babel why "storage"` | May have limits |
+
+    **Consequence of skipping:** May contradict prior decisions.
+
+  - |
+    ### Phase 3: PROPOSE (Capture Intent BEFORE Implementing)
+
+    **Step 1: Capture the task**
+    ```bash
+    babel capture "TASK B.2: Build ConstraintStatus for HC1-HC5 display" --batch
+    # → Returns [abc12345]
+    ```
+
+    **Step 2: Add specification to task**
+    ```bash
+    babel capture --spec abc12345 "OBJECTIVE: Display constraint health status
+
+    ADD:
+    - ConstraintStatus.tsx component
+    - /api/status/constraints endpoint
+
+    MODIFY:
+    - Observatory.tsx to include new component
+
+    REMOVE:
+    - None
+
+    PRESERVE:
+    - Existing health display patterns
+
+    RELATED:
+    - status.py (backend patterns)
+    - types.ts (type definitions)
+
+    TEST:
+    - Component renders all 5 constraints
+    - API returns correct data format
+    - Loading and error states work" --batch
+    ```
+
+    **Step 3: WAIT for user validation**
+    ```
+    "Specification ready for review. Please validate with `babel review`"
+    ```
+
+    **Step 4: Link after acceptance**
+    ```bash
+    # User runs: babel review --accept abc12345
+    babel link abc12345  # Connect to purpose
+    ```
+
+  - |
+    ### Phase 4: IMPLEMENT (After Spec Approved)
+
+    **Only after spec is approved by user.**
+
+    For each file, follow code-mod protocol:
+    - OBJECTIVE: What this file change accomplishes
+    - ADD: What's being introduced
+    - MODIFY: What's changing
+    - REMOVE: What's being eliminated
+    - PRESERVE: What must not change
+    - RELATED: Dependencies to consider
+
+    **HC2 Violation:** Implementing before spec approval.
+
+  - |
+    ### Phase 5: COMPLETE (After Implementation)
+
+    ```bash
+    # Verify coherence
+    babel coherence
+
+    # Capture completion
+    babel capture "TASK B.2 COMPLETE: ConstraintStatus implemented with 5 indicators, API endpoint, tests passing" --batch
+
+    # Link decision to commit
+    babel link <id> --to-commit HEAD
+
+    # Optional: Make team-visible
+    babel share <id>
+    ```
+
+  - |
+    ### Quick Reference: START NEW vs CONTINUE
+
+    | Aspect | START NEW | CONTINUE |
+    |--------|-----------|----------|
+    | First after orient | `babel why "topic"` | `babel history -n 30 \| grep TASK` |
+    | Check for | Existing decisions on topic | COMPLETE vs in-progress tasks |
+    | Dependencies | Query with `babel why` | Check constraints with grep |
+    | Spec capture | Always needed | May already exist — check first |
+    | Risk if skipped | Contradicting prior decisions | Duplicating completed work |
+
+  - |
+    ### Anti-Patterns (DO NOT)
+
+    | Anti-Pattern | Problem | Fix |
+    |--------------|---------|-----|
+    | Multiple broad queries | `babel why "dashboard"` returns generic | Use focused multi-queries |
+    | Skip context check | May contradict prior decisions | Always Phase 2 |
+    | Implement before spec captured | Plan evaporates | Always capture --spec |
+    | Implement before spec approved | HC2 violation | WAIT for review |
+    | Forget to link after review | Orphaned artifact | Link immediately |
+    | Forget git-babel link | Decision disconnected from code | Link to commit |
+
+  - |
+    ### User Hint for Efficient Start
+
+    When starting new work, user can provide:
+    ```
+    "Implement [feature]. Related to [existing topic]."
+    ```
+
+    This enables:
+    1. Skip broad discovery
+    2. Go directly to focused `babel why` queries
+    3. Propose efficiently
+
+  - |
+    ### Complete Example Workflow
+
+    ```bash
+    # PHASE 1: ORIENT
+    babel status && babel tensions && babel questions
+    # → Project: Dashboard monitoring system
+    # → No critical tensions
+    # → 1 open question about auth approach
+
+    # PHASE 2: CONTEXT
+    babel why "component patterns"
+    babel why "health display"
+    # → Found: Using shadcn/ui components
+    # → Found: Health uses color indicators
+
+    # PHASE 3: PROPOSE
+    babel capture "TASK B.2: Build ConstraintStatus component for HC1-HC5 display" --batch
+    # → [abc12345]
+
+    babel capture --spec abc12345 "OBJECTIVE: Display HC constraint status
+    ADD: ConstraintStatus.tsx
+    MODIFY: Observatory.tsx
+    REMOVE: None
+    PRESERVE: Existing PrincipleHealthBar patterns
+    RELATED: types.ts, status.py
+    TEST: Renders 5 constraints, handles loading" --batch
+
+    # WAIT: "Spec ready for review"
+    # User: babel review --accept abc12345
+
+    babel link abc12345
+
+    # PHASE 4: IMPLEMENT
+    # ... write code ...
+
+    # PHASE 5: COMPLETE
+    babel coherence
+    babel capture "TASK B.2 COMPLETE: ConstraintStatus with 5 indicators, themed styling, API integration" --batch
+    babel link <id> --to-commit HEAD
+    ```
+
+  - |
+    ### The Key Rule
+
+    ```
+    Never implement before spec is captured AND approved.
+
+    HC2 (Human Authority) requires human validation before code changes.
+    ```
+
+    **Sequence enforcement:**
+    ```
+    orient → context → propose → WAIT → implement → complete
+                                  ↑
+                           User approval here
+    ```
+

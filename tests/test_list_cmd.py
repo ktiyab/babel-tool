@@ -2,11 +2,13 @@
 Tests for ListCommand — Graph-aware artifact discovery (Redesign #6)
 
 Tests for the babel list command including:
-- Helper functions (_short_id, _get_summary)
+- Helper functions (_get_summary)
 - Overview mode (counts by type)
 - Type listing (artifacts of specific type)
 - Graph traversal (from artifact)
 - Orphan detection
+
+Note: ID formatting is now handled by centralized IDCodec (format_id/codec.encode).
 """
 
 import pytest
@@ -17,7 +19,7 @@ from babel.core.events import EventStore, declare_purpose, confirm_artifact
 from babel.core.graph import GraphStore, Node, Edge
 from babel.config import Config
 from babel.commands.list_cmd import (
-    ListCommand, _short_id, _get_summary, ARTIFACT_TYPES, DEFAULT_LIMIT
+    ListCommand, _get_summary, ARTIFACT_TYPES, DEFAULT_LIMIT
 )
 
 
@@ -110,36 +112,8 @@ def project_with_links(project_with_artifacts):
 # Helper Function Tests
 # =============================================================================
 
-class TestShortId:
-    """Test _short_id helper function."""
-
-    def test_extracts_hash_from_type_hash_format(self):
-        """Extracts hash portion from 'type_hash' format."""
-        assert _short_id("decision_a1b2c3d4e5f6") == "a1b2c3d4"
-
-    def test_handles_underscore_in_type(self):
-        """Handles types that might have underscores."""
-        # Only splits on first underscore
-        assert _short_id("some_type_12345678") == "type_123"
-
-    def test_truncates_to_8_chars(self):
-        """Hash is truncated to 8 characters."""
-        result = _short_id("decision_abcdefghijklmnop")
-        assert len(result) == 8
-        assert result == "abcdefgh"
-
-    def test_handles_no_underscore(self):
-        """Falls back to first 8 chars if no underscore."""
-        assert _short_id("abcdefghij") == "abcdefgh"
-
-    def test_handles_short_id(self):
-        """Handles IDs shorter than 8 chars."""
-        assert _short_id("abc") == "abc"
-
-    def test_handles_empty_after_underscore(self):
-        """Handles edge case of underscore at end."""
-        result = _short_id("type_")
-        assert result == ""
+# Note: TestShortId was removed - ID formatting now uses centralized IDCodec
+# (cli.format_id() for display, cli.codec.encode() for data)
 
 
 class TestGetSummary:
@@ -480,15 +454,18 @@ class TestListFrom:
 
         from unittest.mock import MagicMock
         from babel.core.resolver import IDResolver
+        from babel.presentation.codec import IDCodec
 
         cli = MagicMock()
         cli.graph = graph
         cli.events = events
         cli.config = config
 
-        # Create a real resolver that will return None for unknown ID
+        # Create real resolver and codec for proper ID resolution
         real_resolver = IDResolver(graph)
+        real_codec = IDCodec()
         cli.resolver = real_resolver
+        cli.codec = real_codec
         cmd = ListCommand(cli)
 
         cmd.list_from("nonexistent_xyz123")
@@ -632,19 +609,27 @@ class TestListCommandIntegration:
         events, graph, config, tmp_path = project_with_artifacts
 
         from unittest.mock import MagicMock
+        from babel.presentation.codec import IDCodec
+
         cli = MagicMock()
         cli.graph = graph
         cli.events = events
         cli.config = config
         cli.resolver = MagicMock()
+
+        # Set up codec and format_id to return realistic values
+        codec = IDCodec()
+        cli.codec = codec
+        cli.format_id = lambda node_id: f"[{codec.encode(node_id)}]"
+
         cmd = ListCommand(cli)
 
         cmd.list_by_type("decision")
         captured = capsys.readouterr()
 
-        # Should have ID in brackets followed by summary
+        # Should have ID in brackets (AA-BB format) followed by summary
         import re
-        pattern = r'\[[\w]+\].*\w+'  # [id] followed by text
+        pattern = r'\[[A-Z]{2}-[A-Z]{2}\].*\w+'  # [AA-BB] followed by text
         assert re.search(pattern, captured.out), "Should use dual-display format [ID] summary"
 
     def test_artifact_types_constant(self):

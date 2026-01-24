@@ -1,0 +1,272 @@
+name: tension
+category: validation
+description: Handle auto-detected conflicts with graded severity. View tensions sorted by severity, understand response calibration, resolve with evolution tracking. System auto-detects via coherence.
+trigger: Check open conflicts, system auto-detects tension via coherence, user asks "what conflicts exist" or "check tensions", after coherence shows issues, after review --accept triggers requires_negotiation warning
+
+commands:
+  # View tensions
+  - babel tensions                              # Sorted by severity
+  - babel tensions --full                       # Full details + severity
+  # Create/resolve (same as challenge)
+  - 'babel challenge <id> "reason"'             # Manual tension creation
+  - 'babel resolve <id> --outcome X --force --resolution "..."'
+  # Evolution link (after revised outcome)
+  - babel link <new_id> <old_id>                # Creates evolves_from
+
+principles:
+  - P4 (Disagreement as Hypothesis) - Tensions surface conflicts as testable hypotheses
+  - P5 (Adaptive Cycle Rate) - Severity enables calibrated response speed
+  - P8 (Evolution Traceable) - evolves_from links maintain supersession chain
+  - HC2 (Human Authority) - System warns but proceeds, human decides timing
+
+uses_context:
+  - Open tensions from graph
+  - Severity classifications
+  - Constraint overlaps (for requires_negotiation)
+
+produces:
+  - Tension list sorted by severity
+  - Resolution with evolves_from links
+  - Negotiation warnings (advisory, HC2 compliant)
+
+composable_with:
+  - challenge (tension uses challenge/resolve workflow)
+  - revise (revised outcome triggers revise flow)
+  - verify (coherence triggers tension detection)
+  - maintain (tensions surface during maintenance)
+
+always_load: false
+load_on_demand: true
+user_invocable: true
+
+examples:
+  - |
+    ## FLOW 13: TENSION — Auto-Detected Conflicts with Graded Severity
+
+    **Key Behaviors (implemented automatically):**
+
+    1. **Auto-detection** via graph analysis and semantic comparison
+    2. **Graded severity:** critical, warning, info
+    3. **evolves_from linking** when resolving with --outcome revised
+    4. **requires_negotiation** warnings when artifacts touch constraints
+
+    | Behavior | Trigger | Result |
+    |----------|---------|--------|
+    | Auto-detect | `babel coherence` | Tensions created with severity |
+    | Manual create | `babel challenge <id>` | Tension added |
+    | Resolve | `babel resolve <id> --outcome X` | Tension closed |
+    | Evolution link | `--outcome revised` | Prompts for `evolves_from` link |
+
+  - |
+    ### Severity Levels
+
+    | Severity | Icon | Meaning | Response |
+    |----------|------|---------|----------|
+    | `critical` | 🔴 | Hard constraint violated, multiple conflicts | Accelerate resolution cycle |
+    | `warning` | 🟡 | Potential conflict, needs attention | Maintain current pace |
+    | `info` | 🟢 | Minor tension, informational | Continue normally |
+
+    **Calibrated response (P5):** Severity tells you how urgently to act.
+
+  - |
+    ### Command Reference
+
+    ```bash
+    # View all open tensions (sorted by severity)
+    babel tensions
+
+    # Full details including severity
+    babel tensions --full
+
+    # Create tension manually
+    babel challenge <id> "reason for disagreement"
+
+    # Resolve tension (AI-safe)
+    babel resolve <id> --outcome X --force --resolution "..."
+
+    # Create evolves_from link (after --outcome revised)
+    babel link <new_artifact_id> <old_artifact_id>
+    ```
+
+  - |
+    ### Auto-Detection Triggers
+
+    **Via `babel coherence`:**
+    ```bash
+    babel coherence
+    # → Detects semantic conflicts between artifacts
+    # → Creates tensions with severity classification
+    # → Output shows conflicts found
+    ```
+
+    **Via `babel review --accept`:**
+    ```bash
+    babel review --accept abc123
+    # If artifact keywords overlap with constraint keywords:
+    #   ⚠️  requires_negotiation: This artifact touches constrained areas
+    #   Overlapping constraints: [constraint_id] constraint summary
+    #   HC2: Proceeding — human decides timing of negotiation
+    ```
+
+  - |
+    ### On `resolve --outcome revised`
+
+    When resolving with revision outcome:
+
+    ```bash
+    babel resolve abc123 --outcome revised --force --resolution "Updated approach"
+    # System prompts (or hints in batch mode):
+    #   P8: Evolution link available from [parent_id]
+    #   To link: babel link <new_artifact_id> <parent_id>
+    ```
+
+    **Follow-up required:**
+    ```bash
+    babel link <new_id> <old_id>  # Create the evolves_from chain
+    ```
+
+    **Don't skip this link** — it maintains P8 traceability.
+
+  - |
+    ### Graph Relations Created
+
+    | Event | Relation | Direction | Purpose |
+    |-------|----------|-----------|---------|
+    | `tension_detected` | `tensions_with` | Bidirectional via tension node | Links conflicting artifacts |
+    | `evolution_classified` | `evolves_from` | New → Old | Tracks artifact lineage |
+    | `negotiation_required` | `requires_negotiation` | Artifact → Constraint | Advisory warning |
+
+  - |
+    ### Resolution Outcomes
+
+    | Outcome | Meaning | Follow-up |
+    |---------|---------|-----------|
+    | `confirmed` | Original was correct | None — tension resolved |
+    | `revised` | Original superseded | `babel link <new> <old>` |
+    | `synthesized` | Both partially right | Capture merged understanding |
+    | `uncertain` | Can't decide yet | Hold ambiguity (P6) |
+
+    **Note:** For `revised` outcome, always create the evolves_from link.
+
+  - |
+    ### Complete Workflow Example
+
+    ```bash
+    # Step 1: Check for tensions
+    babel tensions
+    # Output:
+    # 🔴 [t_abc123] Decision conflicts with Constraint
+    #    [a1b2c3d4] Use SQLite ↔ [e5f6g7h8] Require multi-user
+    # 🟡 [t_def456] Minor scope overlap
+    #    [i9j0k1l2] Feature X ↔ [m3n4o5p6] Feature Y
+
+    # Step 2: Address critical tension first
+    babel tensions --full
+    # Get complete context for t_abc123
+
+    # Step 3: Build evidence
+    babel evidence t_abc123 "Load tests show SQLite fails with concurrent users"
+
+    # Step 4: Capture replacement
+    babel capture "Use PostgreSQL for multi-user support" --batch
+    # User accepts → [new_id]
+
+    # Step 5: Resolve with revision
+    babel resolve t_abc123 --outcome revised --force --resolution "Superseded by [new_id]"
+
+    # Step 6: Create evolves_from link
+    babel link [new_id] a1b2c3d4
+    ```
+
+  - |
+    ### requires_negotiation Behavior
+
+    When accepting artifacts that touch constraints:
+
+    ```bash
+    babel review --accept abc123
+    # System checks keyword overlap with constraints
+    # If overlap found:
+    #   ⚠️  requires_negotiation: This artifact touches constrained areas
+    #   Overlapping constraints:
+    #     [c_xyz789] No external dependencies without approval
+    #   HC2: Proceeding — human decides timing of negotiation
+    ```
+
+    **HC2 compliant:** System warns but proceeds. Human decides when to negotiate.
+
+  - |
+    ### Why Tension Matters
+
+    | Principle | How Tension Implements It |
+    |-----------|---------------------------|
+    | **P4 (Disagreement as Hypothesis)** | Tensions surface conflicts as testable hypotheses |
+    | **P5 (Adaptive Cycle Rate)** | Severity enables calibrated response speed |
+    | **P8 (Evolution Traceable)** | `evolves_from` links maintain supersession chain |
+    | **HC2 (Human Authority)** | System warns but proceeds — human decides timing |
+
+  - |
+    ### Tension Lifecycle
+
+    ```
+    DETECTION:
+      coherence → [auto-detect] → tensions (sorted by severity)
+
+    RESOLUTION:
+      babel tensions → evidence(×N) → resolve --outcome X
+      → [if revised: babel link <new_id> <old_id>]
+
+    REQUIRES_NEGOTIATION:
+      review --accept → [auto-warns on constraint overlap] → HC2 proceeds
+    ```
+
+  - |
+    ### Common Mistakes
+
+    | Mistake | Why It's Wrong | Fix |
+    |---------|----------------|-----|
+    | Ignore critical tensions | Conflicts escalate | Address 🔴 first |
+    | Skip evolves_from link | P8 violated, history broken | Always link after revised |
+    | Resolve without evidence | Arbitrary resolution | Build evidence first |
+    | Override requires_negotiation | Constraint may be violated | Acknowledge, plan negotiation |
+    | Treat all tensions equally | Missing severity calibration | 🔴 urgent, 🟡 normal, 🟢 low |
+
+  - |
+    ### Consequence of Skipping
+
+    | Skip | Result |
+    |------|--------|
+    | Skip `babel tensions` at session start | Miss open conflicts |
+    | Skip severity consideration | Wrong prioritization |
+    | Skip evolves_from link | Evolution chain broken (P8) |
+    | Skip requires_negotiation | Constraint violation unacknowledged |
+
+    **Rule:** Conflicts escalate unnoticed, severity ignored, evolution chain broken.
+
+  - |
+    ### The Rule (Summary)
+
+    ```
+    SEVERITY RESPONSE:
+      🔴 Critical → Accelerate resolution
+      🟡 Warning  → Maintain pace
+      🟢 Info     → Continue normally
+
+    LIFECYCLE:
+      coherence → tensions → evidence → resolve → [link if revised]
+
+    KEY COMMANDS:
+      babel tensions                    # View sorted by severity
+      babel tensions --full             # Full details
+      babel resolve <id> --outcome X    # Resolve
+      babel link <new> <old>            # Evolution chain (if revised)
+
+    PRINCIPLES:
+      P4: Conflicts as hypotheses
+      P5: Severity calibrates response
+      P8: evolves_from maintains history
+      HC2: System warns, human decides
+    ```
+
+    **Tensions surface what you can't ignore. Severity tells you when to act.**
+

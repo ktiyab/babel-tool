@@ -1,0 +1,184 @@
+name: BATCH
+description: Always use --batch flag on captures. Never interrupt user for each micro-decision. Queue proposals, announce summaries with WHAT + WHY, remind periodically. HC2 requires proposals queue for human review.
+rule: Queue proposals with --batch → Announce WHAT + WHY → Remind to review. Never ask "Should I capture this?" — just capture with --batch and announce.
+
+applies_to:
+  - 'babel capture "..." --batch'
+  - 'babel capture --spec <id> "..." --batch'
+  - 'babel question "..." --batch'
+  - All AI-initiated captures
+
+user_invocable: false
+
+examples:
+  - |
+    ## BATCH PROTOCOL — Non-Negotiable Capture Discipline
+
+    **The Rule:**
+    - ALWAYS use `--batch` on ALL captures
+    - NEVER ask "Should I capture this?"
+    - ALWAYS announce WHAT + WHY
+    - ALWAYS remind user to review
+
+    **HC2 Connection:** Proposals don't become decisions until human validates.
+
+  - |
+    ### Why Batch?
+
+    | Without Batch | With Batch |
+    |---------------|------------|
+    | Interactive prompt waits | Queued for review |
+    | AI operators hit EOF errors | No interruption |
+    | User interrupted each time | Human validates later (HC2) |
+    | Work flow broken | Work continues |
+
+  - |
+    ### AI's Job
+
+    | Do | Don't |
+    |----|-------|
+    | Use `--batch` on ALL captures (mandatory) | Ask "Should I capture this?" each time |
+    | Announce WHAT + WHY summary | Report only counts ("3 proposals queued") |
+    | Remind user to review periodically | Assume user will remember |
+
+  - |
+    ### User's Job
+
+    | Action | Command |
+    |--------|---------|
+    | Review pending | `babel review` |
+    | Accept all | `babel review --accept-all` |
+    | Accept specific | `babel review --accept <id>` |
+    | Reject specific | `babel review --reject <id>` |
+
+    **Note:** This is USER's action, not AI's.
+
+  - |
+    ### WRONG Behavior
+
+    ```
+    AI: "I noticed you made a decision. Should I capture it in Babel?"
+    [waits for user response]
+    [user interrupted from their work]
+    ```
+
+    **Problems:**
+    - Interrupts user flow
+    - Asks permission instead of acting
+    - Slows down work
+
+  - |
+    ### RIGHT Behavior
+
+    ```
+    AI: "I've queued this decision in Babel:
+
+         [DECISION] Use Redis for caching
+         WHY: API rate limits require local cache
+
+         Review pending: `babel review`"
+    [continues working without waiting]
+    ```
+
+    **Benefits:**
+    - User not interrupted
+    - Clear summary provided
+    - Review path shown
+    - Work continues
+
+  - |
+    ### Announcement Format
+
+    **SHOW (always include):**
+    - WHAT was captured: `[DECISION] Use Redis for caching`
+    - WHY it matters: `API rate limits require local cache`
+    - HOW to review: `Review pending: babel review`
+
+    **WRONG announcements:**
+    - "3 proposals queued"
+    - "Captured in Babel"
+
+    **RIGHT announcement:**
+    ```
+    I've queued this decision:
+      [DECISION] Use SQLite for offline storage
+      WHY: Users need offline access, data volume small (<100MB)
+      Review with: `babel review`
+    ```
+
+  - |
+    ### Periodic Reminders
+
+    **Trigger:** Every few exchanges
+
+    **Format:**
+    ```
+    "You have 5 pending proposals. Review with: `babel review`"
+    ```
+
+    **Consequence of not reminding:**
+    Queue grows stale, nothing gets validated, decisions pile up.
+
+  - |
+    ### Commands That Require --batch
+
+    ```bash
+    # Decision capture
+    babel capture "WHAT + WHY" --batch
+
+    # Specification capture
+    babel capture --spec <id> "OBJECTIVE:..." --batch
+
+    # Question capture
+    babel question "What we don't know" --batch
+    ```
+
+    **All AI-initiated captures MUST use `--batch`.**
+
+  - |
+    ### Consequence of Not Using --batch
+
+    | Problem | Impact |
+    |---------|--------|
+    | Interactive prompt fails | EOF error for AI operators |
+    | User interrupted | Flow broken for each micro-decision |
+    | No human review step | HC2 violated |
+    | Poor experience | Work slows down |
+
+  - |
+    ### Complete Example
+
+    ```
+    # User makes a decision during conversation
+    User: "Let's use PostgreSQL instead of SQLite for multi-user support"
+
+    # AI captures immediately with --batch (no asking)
+    babel capture "Using PostgreSQL instead of SQLite for multi-user support and concurrent access" --batch
+
+    # AI announces with WHAT + WHY
+    AI: "I've queued this decision in Babel:
+
+         [DECISION] Use PostgreSQL instead of SQLite
+         WHY: Multi-user support requires concurrent access
+
+         Review pending: `babel review`"
+
+    # AI continues working, doesn't wait
+
+    # Later, reminds user
+    AI: "You have 3 pending proposals. Review with: `babel review`"
+
+    # User reviews when ready (their job, not AI's)
+    User: babel review --accept-all
+    ```
+
+  - |
+    ### The Rule (Summary)
+
+    ```
+    ALWAYS: --batch on captures → Announce WHAT + WHY → Remind to review
+    NEVER:  Ask permission → Wait for response → Interrupt work
+    ```
+
+    **The `--batch` flag is NON-NEGOTIABLE for AI operators.**
+

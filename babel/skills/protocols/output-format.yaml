@@ -1,0 +1,170 @@
+name: OUTPUT-FORMAT
+description: Tables with WHY column for multi-item output. Transform data into understanding. Never dump raw command output. Raw output is for machines — tables with WHY are for humans.
+rule: Never dump raw command output. Format as tables with WHY column explaining significance. Transform data into understanding, not just facts.
+
+applies_to:
+  - All multi-item output
+  - All list displays
+  - All summary reports
+  - All Babel command results
+
+user_invocable: false
+
+examples:
+  - |
+    ## OUTPUT-FORMAT PROTOCOL — Tables with WHY Column
+
+    **The Rule:**
+    Raw output is for machines. Tables with WHY are for humans.
+
+    | Output Type | Problem | Solution |
+    |-------------|---------|----------|
+    | Raw list | No context, no understanding | Table with WHY column |
+    | ID only | Opaque — user can't comprehend | ID + Summary |
+    | Facts only | User sees data, not meaning | Add WHY It Matters |
+
+  - |
+    ### Mandatory Checklist (BEFORE ANY Output)
+
+    **STOP and verify before outputting to user:**
+
+    - [ ] Is data presented as a TABLE with WHY column?
+    - [ ] Does every item have BOTH ID + readable summary?
+    - [ ] Would user understand the REASONING, not just facts?
+    - [ ] Am I transforming data into UNDERSTANDING?
+
+    **If dumping raw command output:** STOP. Reformat it.
+
+  - |
+    ### Required Columns
+
+    | Column | Purpose | Required? |
+    |--------|---------|-----------|
+    | **ID** | Actionable reference | Yes |
+    | **Type** | Artifact category | If applicable |
+    | **Summary** | Human-readable description | Yes |
+    | **WHY It Matters** | Context and significance | Yes |
+    | **HOW** | Implementation detail | Optional |
+
+    **Minimum:** ID + Summary + WHY
+    **Full:** ID + Type + Summary + WHY + HOW
+
+  - |
+    ### BAD Output (DO NOT DO THIS)
+
+    ```
+    [969f9ca7] [DECISION] Lower consensus threshold...
+    [f87af1c2] [CONSTRAINT] Solo projects cannot reach...
+    [e9ebf913] [REQUIREMENT] Decisions need validation...
+    ```
+
+    **Problems:**
+    - No WHY, no context
+    - Just data dump
+    - User sees text but gains no understanding
+
+  - |
+    ### GOOD Output (DO THIS)
+
+    | ID | Type | Summary | WHY It Matters |
+    |----|------|---------|----------------|
+    | `969f9ca7` | DECISION | Lower consensus to 1 | Solo projects can now validate decisions |
+    | `f87af1c2` | CONSTRAINT | Solo can't reach 2 | Explains why threshold change needed |
+    | `e9ebf913` | REQUIREMENT | Validation must work solo | Ensures feature works for all users |
+
+    **Benefit:** User sees table, understands context, can act on IDs.
+
+  - |
+    ### With HOW Column (When Implementation Matters)
+
+    | ID | Summary | WHY | HOW |
+    |----|---------|-----|-----|
+    | `a1b2c3d4` | Add Redis caching | Rate limits require local cache | `@cache_response` decorator |
+    | `e5f6g7h8` | Validate auth tokens | Security requirement | JWT middleware in `auth.py` |
+
+    **Add HOW when:**
+    - Implementation detail aids understanding
+    - User needs to know WHERE change happens
+    - Technical context is relevant
+
+  - |
+    ### Transformation Examples
+
+    **Tensions list:**
+    ```
+    # RAW (DON'T)
+    🔴 [abc123] conflicts with [def456]
+    🟡 [ghi789] conflicts with [jkl012]
+
+    # TRANSFORMED (DO)
+    | Severity | Artifacts | Summary | WHY Resolution Needed |
+    |----------|-----------|---------|----------------------|
+    | 🔴 Critical | `abc123` ↔ `def456` | Auth vs Performance | Both can't be true — must choose |
+    | 🟡 Warning | `ghi789` ↔ `jkl012` | Cache vs Consistency | Trade-off needs explicit decision |
+    ```
+
+  - |
+    ### Gaps output:**
+    ```
+    # RAW (DON'T)
+    Unlinked decisions: 5
+    Unlinked commits: 3
+
+    # TRANSFORMED (DO)
+    | Gap Type | Count | WHY It Matters | Action |
+    |----------|-------|----------------|--------|
+    | Unlinked decisions | 5 | Intent without implementation | `babel gaps --decisions` |
+    | Unlinked commits | 3 | Code without documented reason | `babel gaps --commits` |
+    ```
+
+  - |
+    ### After Context Compression
+
+    When session context is compressed, you may forget these rules.
+
+    **Recovery protocol:**
+    1. Run `babel why "output format"` to retrieve this constraint
+    2. Apply the checklist above before ANY output
+    3. Transform raw data into tables with WHY column
+
+    **If unsure:** Default to table format. Never raw dump.
+
+  - |
+    ### Connection to DUAL-DISPLAY Protocol
+
+    OUTPUT-FORMAT and DUAL-DISPLAY work together:
+
+    | Protocol | Focus | Rule |
+    |----------|-------|------|
+    | **DUAL-DISPLAY** | Single items | `[ID] readable summary` |
+    | **OUTPUT-FORMAT** | Multiple items | Tables with WHY column |
+
+    **Both ensure:** User can understand AND act.
+
+  - |
+    ### DO vs DON'T Summary
+
+    | DO | DON'T |
+    |----|-------|
+    | Table with columns | Raw list output |
+    | ID + Summary + WHY | ID alone or Summary alone |
+    | Transform data | Dump data |
+    | Context for each item | Expect user to interpret |
+    | WHY column always | Facts without significance |
+
+  - |
+    ### The Rule (Summary)
+
+    ```
+    ALWAYS: Transform → Table → WHY column → Understanding
+    NEVER:  Dump → Raw list → Facts only → Confusion
+
+    Checklist:
+    - [ ] TABLE format?
+    - [ ] WHY column present?
+    - [ ] ID + Summary for each item?
+    - [ ] User gains UNDERSTANDING, not just data?
+    ```
+
+    **Raw output is for machines. Tables with WHY are for humans.**
+

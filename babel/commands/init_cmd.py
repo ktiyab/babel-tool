@@ -6,8 +6,10 @@ Handles project initialization (P1 compliance):
 - Installing system prompt template
 - Outputting system prompt for LLM integration
 - Auto-detecting IDE and installing LLM-specific prompt
+- Auto-detecting CPU cores and configuring parallelization
 """
 
+import multiprocessing
 import shutil
 from pathlib import Path
 
@@ -64,6 +66,9 @@ class InitCommand(BaseCommand):
         # Auto-detect IDE and install LLM-specific prompt
         ide_type, ide_message = self._install_llm_prompt()
 
+        # Auto-detect CPU cores and configure parallelization
+        parallel_config, parallel_message = self._configure_parallelization()
+
         print(f"Project created: {self.project_dir}")
         if need:
             print(f"Need: {need}")
@@ -91,6 +96,11 @@ class InitCommand(BaseCommand):
         if env_patterns_added:
             print(f"\nSecurity:")
             print(f"  {gitignore_message} (prevents credential leakage)")
+
+        # Show parallelization status
+        if parallel_config:
+            print(f"\nParallelization:")
+            print(f"  {parallel_message}")
 
         # Succession hint (centralized)
         from ..output import end_command
@@ -159,6 +169,68 @@ class InitCommand(BaseCommand):
 
         return missing_patterns, f"Added {', '.join(missing_patterns)} to .gitignore"
 
+    def _configure_parallelization(self) -> tuple:
+        """
+        Auto-detect CPU cores and configure parallelization in .env.
+
+        Detects hardware capabilities and sets optimal defaults:
+        - BABEL_CPU_WORKERS: Half of available cores (leaves headroom)
+        - BABEL_IO_WORKERS: 4 (sufficient for most I/O workloads)
+        - BABEL_LLM_CONCURRENT: 3 (respects API rate limits)
+
+        Returns:
+            Tuple of (config_dict, message) describing what was configured
+        """
+        env_path = self.project_dir / ".env"
+
+        # Detect hardware
+        cpu_count = multiprocessing.cpu_count()
+        cpu_workers = max(1, cpu_count // 2)
+        io_workers = 4
+        llm_concurrent = 3
+
+        # Build config lines
+        parallel_config = {
+            "BABEL_PARALLEL_ENABLED": "true",
+            "BABEL_CPU_WORKERS": str(cpu_workers),
+            "BABEL_IO_WORKERS": str(io_workers),
+            "BABEL_LLM_CONCURRENT": str(llm_concurrent),
+        }
+
+        # Check what's already configured
+        existing_content = ""
+        existing_keys = set()
+        if env_path.exists():
+            existing_content = env_path.read_text()
+            for line in existing_content.splitlines():
+                line = line.strip()
+                if line and not line.startswith("#") and "=" in line:
+                    # Handle both 'export KEY=val' and 'KEY=val'
+                    key_part = line.split("=")[0].replace("export ", "").strip()
+                    existing_keys.add(key_part)
+
+        # Find keys not yet configured
+        missing_keys = {k: v for k, v in parallel_config.items() if k not in existing_keys}
+
+        if not missing_keys:
+            return {}, f"Detected {cpu_count} cores (parallelization already configured)"
+
+        # Build section to append
+        section = "\n# -----------------------------------------------------------------------------\n"
+        section += f"# Parallelization (auto-detected: {cpu_count} cores)\n"
+        section += "# -----------------------------------------------------------------------------\n"
+        for key, value in missing_keys.items():
+            section += f"export {key}={value}\n"
+
+        # Append to .env
+        with open(env_path, "a") as f:
+            if existing_content and not existing_content.endswith("\n"):
+                f.write("\n")
+            f.write(section)
+
+        message = f"Detected {cpu_count} cores → CPU_WORKERS={cpu_workers}, IO_WORKERS={io_workers}"
+        return missing_keys, message
+
     def _install_llm_prompt(self):
         """
         Auto-detect IDE and install LLM-specific prompt.
@@ -212,3 +284,21 @@ class InitCommand(BaseCommand):
             print(prompt_path.read_text())
         else:
             print("System prompt not found. Run: babel init \"purpose\"")
+
+
+# =============================================================================
+# Command Registration (Self-Registration Pattern)
+# =============================================================================
+
+def register_parser(subparsers):
+    """Register init command parser."""
+    p = subparsers.add_parser('init', help='Start a new project')
+    p.add_argument('purpose', help='What are you building?')
+    p.add_argument('--need', '-n',
+                   help='What problem are you solving? (P1: grounds purpose in reality)')
+    return p
+
+
+def handle(cli, args):
+    """Handle init command dispatch."""
+    cli._init_cmd.init(args.purpose, need=args.need)

@@ -1,0 +1,39 @@
+name: security-audit
+category: analyze
+description: Context-aware vulnerability assessment - security review that considers project's actual threat model
+trigger: Security review needed, "audit security", "vulnerability check", pre-release check
+
+commands:
+  - babel why "security"
+  - babel scan --type security
+  - babel scan --type security --deep
+
+principles:
+  - P3 (Expertise-Weighted)
+  - P5 (Dual-Test Truth)
+
+uses_context:
+  - Project purpose (threat model inference)
+  - Security-related constraints
+  - Decisions about data handling
+  - Tech stack security implications
+
+produces:
+  - Data handling assessment
+  - Auth/authorization pattern review
+  - Input validation coverage
+  - Dependency security implications
+  - Secrets management evaluation
+
+composable_with:
+  - recall
+  - challenge
+
+always_load: false
+load_on_demand: true
+user_invocable: true
+
+# Key differentiator:
+# Generic scanner: "SQL injection risk"
+# Babel security: "SQL injection risk conflicts with your 'sanitize all input'
+#                  constraint [abc123]. Check entry points X, Y, Z."

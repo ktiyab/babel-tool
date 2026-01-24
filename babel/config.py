@@ -25,14 +25,35 @@ from typing import Optional, Dict, Any
 from .presentation.symbols import get_symbols
 
 
+def _find_project_root(start_dir: Path) -> Optional[Path]:
+    """
+    Walk up directory tree to find project root (directory containing .babel/).
+
+    Args:
+        start_dir: Directory to start searching from
+
+    Returns:
+        Path to project root if found, None otherwise
+    """
+    current = start_dir.resolve()
+    while current != current.parent:  # Stop at filesystem root
+        if (current / ".babel").exists():
+            return current
+        current = current.parent
+    # Check root itself
+    if (current / ".babel").exists():
+        return current
+    return None
+
+
 def _load_dotenv():
     """
     Attempt to load .env files using python-dotenv.
 
-    Searches for .env in (order of priority):
-      1. Current working directory
-      2. Project root (containing .babel/)
-      3. User config directory (~/.babel/.env)
+    Searches for .env in (order of priority, later overrides earlier):
+      1. User config directory (~/.babel/.env)
+      2. Project root (found by walking up from CWD to find .babel/)
+      3. Current working directory (highest priority)
 
     Gracefully does nothing if python-dotenv is not installed.
     """
@@ -45,15 +66,16 @@ def _load_dotenv():
     # Search paths for .env files (later paths override earlier)
     search_paths = []
 
-    # User config directory
+    # User config directory (lowest priority)
     user_env = Path.home() / ".babel" / ".env"
     if user_env.exists():
         search_paths.append(user_env)
 
-    # Project root (look for .babel/ directory)
+    # Project root (walk up directory tree to find .babel/)
     cwd = Path.cwd()
-    if (cwd / ".babel").exists():
-        project_env = cwd / ".env"
+    project_root = _find_project_root(cwd)
+    if project_root:
+        project_env = project_root / ".env"
         if project_env.exists():
             search_paths.append(project_env)
 
@@ -297,9 +319,14 @@ class ConfigManager:
     LEGACY_PROJECT_CONFIG_DIR = ".intent"
     
     def __init__(self, project_dir: Optional[Path] = None):
-        self.project_dir = Path(project_dir) if project_dir else Path.cwd()
+        # Priority: explicit param > BABEL_PROJECT_PATH env var > CWD
+        if project_dir is not None:
+            self.project_dir = Path(project_dir)
+        else:
+            env_path = os.environ.get("BABEL_PROJECT_PATH")
+            self.project_dir = Path(env_path) if env_path else Path.cwd()
         self._config: Optional[Config] = None
-        
+
         # Auto-migrate from .intent to .babel
         self._migrate_if_needed()
     
@@ -543,3 +570,99 @@ class ConfigManager:
 def get_config(project_dir: Optional[Path] = None) -> Config:
     """Load configuration for a project."""
     return ConfigManager(project_dir).load()
+
+
+# =============================================================================
+# Environment File Utilities
+# =============================================================================
+
+def update_env_file(
+    project_dir: Path,
+    variables: Dict[str, str],
+    section_name: str,
+    section_comment: str = ""
+) -> tuple:
+    """
+    Update .env file with new variables, preserving existing content.
+
+    Extracted from init_cmd._configure_parallelization() for reuse across
+    commands that need to update .env (skill export, prompt install, etc.).
+
+    Pattern:
+      1. Read existing .env content
+      2. Parse existing keys (handles 'export KEY=val' and 'KEY=val')
+      3. Find keys not already configured
+      4. Append section with header comment
+
+    Args:
+        project_dir: Project root directory containing .env
+        variables: Dict of KEY=value pairs to set
+        section_name: Name for the section header (e.g., "Parallelization")
+        section_comment: Optional comment after section name
+
+    Returns:
+        Tuple of (variables_added: dict, message: str)
+    """
+    env_path = project_dir / ".env"
+
+    # Read existing content and parse keys
+    existing_content = ""
+    existing_keys = set()
+    if env_path.exists():
+        existing_content = env_path.read_text()
+        for line in existing_content.splitlines():
+            line = line.strip()
+            if line and not line.startswith("#") and "=" in line:
+                # Handle both 'export KEY=val' and 'KEY=val'
+                key_part = line.split("=")[0].replace("export ", "").strip()
+                existing_keys.add(key_part)
+
+    # Find keys not yet configured
+    missing_keys = {k: v for k, v in variables.items() if k not in existing_keys}
+
+    if not missing_keys:
+        return {}, f"{section_name} already configured"
+
+    # Build section to append
+    comment_suffix = f" ({section_comment})" if section_comment else ""
+    section = "\n# -----------------------------------------------------------------------------\n"
+    section += f"# {section_name}{comment_suffix}\n"
+    section += "# -----------------------------------------------------------------------------\n"
+    for key, value in missing_keys.items():
+        section += f"export {key}={value}\n"
+
+    # Append to .env
+    with open(env_path, "a") as f:
+        if existing_content and not existing_content.endswith("\n"):
+            f.write("\n")
+        f.write(section)
+
+    keys_list = ", ".join(f"{k}={v}" for k, v in missing_keys.items())
+    return missing_keys, f"{section_name}: {keys_list}"
+
+
+def get_env_variable(project_dir: Path, key: str) -> Optional[str]:
+    """
+    Read a specific variable from project .env file.
+
+    Args:
+        project_dir: Project root directory
+        key: Variable name to read
+
+    Returns:
+        Variable value or None if not found
+    """
+    env_path = project_dir / ".env"
+    if not env_path.exists():
+        return None
+
+    for line in env_path.read_text().splitlines():
+        line = line.strip()
+        if line and not line.startswith("#") and "=" in line:
+            # Handle both 'export KEY=val' and 'KEY=val'
+            parts = line.split("=", 1)
+            found_key = parts[0].replace("export ", "").strip()
+            if found_key == key and len(parts) > 1:
+                return parts[1].strip()
+
+    return None

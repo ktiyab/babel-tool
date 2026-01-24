@@ -1,0 +1,148 @@
+name: AI-SAFE
+description: Non-interactive command patterns for AI operators. Use when executing babel commands to avoid EOF errors from interactive prompts. Contains all --batch, --force, and direct-argument patterns.
+user_invocable: false
+
+rule: |
+  AI operators cannot use interactive prompts. Commands that wait for input cause EOF errors.
+  If a command takes user input → provide it as argument + appropriate flags.
+
+  Flag meanings:
+  --batch     → Queue for review, don't prompt
+  --force     → Skip confirmation prompts
+  "reason"    → Provide as positional argument
+
+applies_to:
+  - babel capture (use --batch)
+  - babel capture --spec (use --batch)
+  - babel question (use --batch)
+  - babel review (use --accept <id> or --accept-all or --reject <id>)
+  - babel resolve (use --force --resolution "text")
+  - babel coherence --resolve (use --batch)
+  - babel deprecate (provide reason as argument)
+
+examples:
+  - |
+    ## The Problem
+
+    ```bash
+    # WRONG — prompts for input, causes EOF
+    babel capture "text"
+    babel coherence --resolve
+    babel resolve <id> --outcome X
+
+    # RIGHT — all params provided, no prompts
+    babel capture "text" --batch
+    babel coherence --resolve --batch
+    babel resolve <id> --outcome X --force --resolution "text"
+    ```
+
+  - |
+    ## Non-Interactive Patterns
+
+    ### Capture Commands
+
+    ```bash
+    # Decision capture
+    babel capture "WHAT + WHY" --batch
+
+    # Specification capture
+    babel capture --spec <id> "OBJECTIVE:... ADD:... MODIFY:..." --batch
+
+    # Question capture
+    babel question "uncertainty" --batch
+    ```
+
+  - |
+    ### Review Commands
+
+    ```bash
+    # Accept all pending
+    babel review --accept-all
+
+    # Accept specific
+    babel review --accept <id>
+
+    # Reject specific
+    babel review --reject <id>
+
+    # List only (safe)
+    babel review --list
+    ```
+
+  - |
+    ### Resolution Commands
+
+    ```bash
+    # Challenge resolution (provide all params)
+    babel resolve <id> --outcome confirmed --force --resolution "Validated by testing"
+    babel resolve <id> --outcome revised --force --resolution "Updated based on evidence"
+    babel resolve <id> --outcome synthesized --force --resolution "Merged approaches"
+    babel resolve <id> --outcome uncertain --force --resolution "Need more data"
+
+    # Question resolution
+    babel resolve-question <id> "What was decided"
+    ```
+
+  - |
+    ### Coherence Commands
+
+    ```bash
+    # Check only (safe)
+    babel coherence
+    babel coherence --full
+
+    # Resolve mode for AI (non-interactive)
+    babel coherence --resolve --batch
+    ```
+
+  - |
+    ### Deprecation
+
+    ```bash
+    # Provide reason as argument (not prompt)
+    babel deprecate <id> "Superseded by new approach"
+    ```
+
+  - |
+    ### Always Safe (No Interactive Mode)
+
+    These commands never prompt — safe as-is:
+
+    ```bash
+    babel link <id>
+    babel link <id> <purpose_id>
+    babel link <id> --to-commit <sha>
+    babel challenge <id> "reason"
+    babel evidence <id> "observation"
+    babel endorse <id>
+    babel evidence-decision <id> "proof"
+    babel why "topic"
+    babel status
+    babel tensions
+    babel questions
+    babel list decisions
+    babel list --from <id>
+    babel history <id>
+    babel gaps
+    babel suggest-links
+    ```
+
+  - |
+    ## If You Hit an Interactive Prompt
+
+    1. **Stop** — Command will fail with EOF
+    2. **Check** — `babel <command> --help`
+    3. **Retry** — Add missing flags/arguments
+
+  - |
+    ## Quick Reference Table
+
+    | Command | Interactive (❌) | Non-Interactive (✓) |
+    |---------|-----------------|---------------------|
+    | `capture` | `babel capture "text"` | `babel capture "text" --batch` |
+    | `capture --spec` | N/A | `babel capture --spec <id> "..." --batch` |
+    | `question` | `babel question "text"` | `babel question "text" --batch` |
+    | `coherence --resolve` | `babel coherence --resolve` | `babel coherence --resolve --batch` |
+    | `resolve` | `babel resolve <id> --outcome X` | `babel resolve <id> --outcome X --force --resolution "..."` |
+    | `review` | `babel review` | `babel review --accept <id>` / `--accept-all` |
+    | `deprecate` | `babel deprecate <id>` | `babel deprecate <id> "reason"` |

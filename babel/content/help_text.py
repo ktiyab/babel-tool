@@ -40,7 +40,11 @@ QUERYING
                                 Shows decisions, constraints, and connections
 
   babel status                  Show project overview
-                                Events, artifacts, coherence, scope counts
+                                Events, artifacts, purposes, coherence
+      --limit-purposes <n>      Show n most recent purposes (default: 10)
+                                Use 0 to show all purposes
+      --git                     Include git-babel sync health
+      --full                    Show full content without truncation
 
   babel history                 Show recent activity
       -n <count>                Number of events (default: 10)
@@ -99,6 +103,67 @@ LLM INTEGRATION
                                 Copy/paste into your LLM's system prompt
 
   cat .system_prompt.md         View the system prompt file directly
+
+
+CODE SYMBOL INDEX
+-----------------
+
+  Processor-backed symbol index for strategic code loading.
+  Uses AST parsing to map classes, functions, and methods.
+  Reduces token waste by loading only relevant code portions.
+
+  babel map --index             Build full symbol index (AST-based)
+      --index-incremental       Update only changed files (git diff based)
+      --index-path PATH         Index specific path only
+
+  babel map --query NAME        Query symbols by name
+                                Matches class, function, or method names
+
+  babel map --index-stats       Show index statistics
+                                Classes, functions, methods, files indexed
+
+  Examples:
+    babel map --index                    # Full project index
+    babel map --index-path src/core      # Index specific directory
+    babel map --query GraphStore         # Find symbol by name
+    babel map --index-incremental        # Update after git pull
+
+
+CONTEXT GATHERING
+-----------------
+
+  Parallel context gathering from multiple sources.
+  Batches file reads, greps, commands, and symbols into one operation.
+  Reduces round-trips and enables strategic context loading.
+
+  babel gather                  Gather context in parallel
+      --file, -f PATH           File to read (repeatable)
+      --grep, -g PATTERN[:PATH] Grep pattern with optional path (repeatable)
+      --bash, -b COMMAND        Bash command to execute (repeatable)
+      --glob PATTERN            Glob pattern to find files (repeatable)
+      --symbol, -s NAME         Symbol to load (class/function/method) (repeatable)
+
+      --operation, -o TEXT      Operation name for header
+      --intent, -i TEXT         Intent description for header
+      --format {markdown,json}  Output format (default: markdown)
+      --output FILE             Write to file instead of stdout
+
+      --limit KB                Context size limit (default: 100)
+      --strategy {size,coherence,priority}
+                                Chunking strategy (default: coherence)
+
+  Examples:
+    babel gather -f src/api.py -f src/cache.py
+                                Gather multiple files in parallel
+
+    babel gather --symbol GraphStore --symbol EventStore
+                                Load specific class definitions only
+
+    babel gather -f README.md -g "TODO:src/" -b "git log -5"
+                                Combine files, greps, and commands
+
+    babel gather -s CodeSymbolStore --operation "Fix bug" --intent "Understand cache"
+                                Structured context with metadata header
 
 
 MEMOS (Persistent Preferences)

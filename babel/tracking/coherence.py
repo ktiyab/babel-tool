@@ -441,13 +441,13 @@ class CoherenceChecker:
         deprecated_ids = self._get_deprecated_ids()
         artifacts = []
 
-        for event in self.events.read_all():
+        # Use type-indexed cache (O(1) lookup) instead of read_all() + filter
+        for event in self.events.read_by_type(EventType.ARTIFACT_CONFIRMED):
             if event.timestamp <= since:
                 continue
-            if event.type == EventType.ARTIFACT_CONFIRMED:
-                node = self.graph.get_node(f"{event.data['artifact_type']}_{event.id}")
-                if node and node.id not in deprecated_ids:
-                    artifacts.append(node)
+            node = self.graph.get_node(f"{event.data['artifact_type']}_{event.id}")
+            if node and node.id not in deprecated_ids:
+                artifacts.append(node)
 
         return artifacts
     
@@ -727,18 +727,18 @@ class CoherenceChecker:
         if not node.event_id:
             return False
 
-        # Find the source event
-        for event in self.events.read_all():
-            if event.id == node.event_id:
-                try:
-                    event_time = datetime.fromisoformat(event.timestamp.replace('Z', '+00:00'))
-                    now = datetime.now(timezone.utc)
-                    age_seconds = (now - event_time).total_seconds()
-                    return age_seconds < grace_seconds
-                except (ValueError, TypeError):
-                    return False
+        # Direct lookup by ID instead of iterating all events
+        event = self.events.get(node.event_id)
+        if not event:
+            return False
 
-        return False
+        try:
+            event_time = datetime.fromisoformat(event.timestamp.replace('Z', '+00:00'))
+            now = datetime.now(timezone.utc)
+            age_seconds = (now - event_time).total_seconds()
+            return age_seconds < grace_seconds
+        except (ValueError, TypeError):
+            return False
     
     def _determine_status(self, entities: List[EntityStatus]) -> str:
         """Determine overall status from entity statuses."""
@@ -862,12 +862,11 @@ class CoherenceChecker:
         Returns human-readable age string (e.g., "2 hours ago", "3 days ago").
         Returns None if event not found.
         """
-        # Find the creation event for this artifact
-        for event in self.events.read_all():
-            if event.type == EventType.ARTIFACT_CONFIRMED:
-                # Event ID is embedded in artifact ID (e.g., "decision_abc123")
-                if artifact_id.endswith(event.id) or event.id in artifact_id:
-                    return _format_age(event.timestamp)
+        # Use type-indexed cache instead of read_all() + filter
+        for event in self.events.read_by_type(EventType.ARTIFACT_CONFIRMED):
+            # Event ID is embedded in artifact ID (e.g., "decision_abc123")
+            if artifact_id.endswith(event.id) or event.id in artifact_id:
+                return _format_age(event.timestamp)
 
         return None
 

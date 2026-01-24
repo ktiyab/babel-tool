@@ -56,16 +56,16 @@ class ValidationCommand(BaseCommand):
             print(f"\n  Consensus: {updated.endorsement_count} of {consensus_needed}{' needed' if updated.endorsement_count < consensus_needed else ''}")
             print(f"  Evidence: {updated.evidence_count}{' (none yet)' if updated.evidence_count == 0 else ''}")
 
-            short = target_node.event_id[:8] if target_node.event_id else target_node.id.split('_', 1)[-1][:8]
+            alias = self._cli.codec.encode(target_node.id)
             if updated.status == ValidationStatus.VALIDATED:
                 print(f"\n  Status: Validated")
                 print(f"  This decision now has both team consensus and evidence.")
             elif updated.status == ValidationStatus.CONSENSUS:
                 print(f"\n  Status: Needs evidence")
-                print(f"  {symbols.arrow} babel evidence-decision {short} \"observed...\"")
+                print(f"  {symbols.arrow} babel evidence-decision {alias} \"observed...\"")
             else:
                 print(f"\n  Status: Needs more consensus")
-                print(f"  {symbols.arrow} Ask a teammate: babel endorse {short}")
+                print(f"  {symbols.arrow} Ask a teammate: babel endorse {alias}")
         else:
             print(f"Already endorsed by you.")
 
@@ -109,16 +109,16 @@ class ValidationCommand(BaseCommand):
             print(f"\n  Consensus: {updated.endorsement_count} of {consensus_needed}{' needed' if updated.endorsement_count < consensus_needed else ''}")
             print(f"  Evidence: {updated.evidence_count}")
 
-            short = target_node.event_id[:8] if target_node.event_id else target_node.id.split('_', 1)[-1][:8]
+            alias = self._cli.codec.encode(target_node.id)
             if updated.status == ValidationStatus.VALIDATED:
                 print(f"\n  Status: Validated")
                 print(f"  This decision now has both team consensus and evidence.")
             elif updated.status == ValidationStatus.EVIDENCED:
                 print(f"\n  Status: Needs consensus")
-                print(f"  {symbols.arrow} babel endorse {short}")
+                print(f"  {symbols.arrow} babel endorse {alias}")
             else:
                 print(f"\n  Status: Needs more consensus")
-                print(f"  {symbols.arrow} Ask a teammate: babel endorse {short}")
+                print(f"  {symbols.arrow} Ask a teammate: babel endorse {alias}")
         else:
             print("Failed to add evidence.")
 
@@ -149,18 +149,19 @@ class ValidationCommand(BaseCommand):
 
             validation = self.validation.get_validation(target_node.id)
 
-            print(f"\nDecision [{target_node.id[:8]}]")
+            print(f"\nDecision {self._cli.format_id(target_node.id)}")
             print(f"  {target_node.content.get('summary', '')}")
             print()
 
             if validation:
                 print(format_validation_status(validation, verbose=verbose, full=full))
             else:
+                alias = self._cli.codec.encode(target_node.id)
                 print(f"{symbols.proposed} PROPOSED -- not yet validated")
                 print()
                 print("To validate this decision:")
-                print(f"  * Consensus: babel endorse {target_node.id[:8]}")
-                print(f"  * Evidence: babel evidence {target_node.id[:8]} \"...\"")
+                print(f"  * Consensus: babel endorse {alias}")
+                print(f"  * Evidence: babel evidence {alias} \"...\"")
         else:
             # Show summary
             print(format_validation_summary(self.validation, full=full))
@@ -172,28 +173,26 @@ class ValidationCommand(BaseCommand):
                 print(f"\n{symbols.check_warn} Groupthink Risk (consensus without evidence):")
                 for did in partial["consensus_only"][:5]:
                     node = self._cli._find_node_by_id(did)
-                    # Extract hash part after "decision_" prefix for display
-                    short_id = did.split('_', 1)[-1][:8] if '_' in did else did[:8]
+                    formatted_id = self._cli.format_id(did)
                     if node:
                         summary = truncate(node.content.get('summary', ''), SUMMARY_LENGTH, full)
-                        print(f"  [{short_id}] {summary}")
+                        print(f"  {formatted_id} {summary}")
                     else:
                         # Show ID even if node not found in graph
-                        print(f"  [{short_id}] (decision not in graph)")
+                        print(f"  {formatted_id} (decision not in graph)")
                 print(f"\n  {symbols.arrow} babel evidence-decision <id> \"...\" to add evidence")
 
             if partial["evidence_only"]:
                 print(f"\n{symbols.check_warn} Unreviewed Risk (evidence without consensus):")
                 for did in partial["evidence_only"][:5]:
                     node = self._cli._find_node_by_id(did)
-                    # Extract hash part after "decision_" prefix for display
-                    short_id = did.split('_', 1)[-1][:8] if '_' in did else did[:8]
+                    formatted_id = self._cli.format_id(did)
                     if node:
                         summary = truncate(node.content.get('summary', ''), SUMMARY_LENGTH, full)
-                        print(f"  [{short_id}] {summary}")
+                        print(f"  {formatted_id} {summary}")
                     else:
                         # Show ID even if node not found in graph
-                        print(f"  [{short_id}] (decision not in graph)")
+                        print(f"  {formatted_id} (decision not in graph)")
                 print(f"\n  {symbols.arrow} babel endorse <id> to add consensus")
 
         # Succession hint (centralized)
@@ -219,24 +218,24 @@ class ValidationCommand(BaseCommand):
                 )
 
             validation = self.validation.get_validation(target_node.id)
-            short_id = target_node.id[:8]
+            alias = self._cli.codec.encode(target_node.id)
 
             data = {
-                "id": short_id,
+                "id": alias,
                 "summary": target_node.content.get('summary', ''),
                 "status": validation.status.value if validation else "proposed",
                 "consensus": validation.endorsement_count if validation else 0,
                 "evidence": validation.evidence_count if validation else 0,
                 "_actions": [
-                    {"command": f"babel endorse {short_id}", "description": "Add consensus"},
-                    {"command": f"babel evidence-decision {short_id} \"...\"", "description": "Add evidence"}
+                    {"command": f"babel endorse {alias}", "description": "Add consensus"},
+                    {"command": f"babel evidence-decision {alias} \"...\"", "description": "Add evidence"}
                 ]
             }
 
             return OutputSpec(
                 data=data,
                 shape="detail",
-                title=f"Decision [{short_id}]"
+                title=f"Decision [{alias}]"
             )
         else:
             # Summary table view
@@ -251,11 +250,11 @@ class ValidationCommand(BaseCommand):
                 for did in decision_ids:
                     node = self._cli._find_node_by_id(did)
                     val = self.validation.get_validation(did)
-                    short_id = did.split('_', 1)[-1][:8] if '_' in did else did[:8]
+                    alias = self._cli.codec.encode(did)
                     summary = node.content.get('summary', '')[:50] if node else "(not in graph)"
 
                     rows.append({
-                        "id": short_id,
+                        "id": alias,
                         "decision": summary,
                         "status": val.status.value if val else "proposed",
                         "consensus": val.endorsement_count if val else 0,
@@ -269,3 +268,59 @@ class ValidationCommand(BaseCommand):
                 column_keys=["id", "decision", "status", "consensus", "evidence"],
                 title=f"Validation Status: {stats['tracked']} decisions tracked\n[V] Validated: {stats['validated']}"
             )
+
+
+# =============================================================================
+# Command Registration (Self-Registration Pattern)
+# =============================================================================
+
+# Multiple commands registered by this module
+COMMAND_NAMES = ['validation', 'endorse', 'evidence-decision']
+
+
+def register_parser(subparsers):
+    """Register validation, endorse, and evidence-decision command parsers."""
+    # validation command
+    p1 = subparsers.add_parser('validation', help='Show validation status (P9: dual-test truth)')
+    p1.add_argument('decision_id', nargs='?', help='Specific decision ID (optional)')
+    p1.add_argument('-v', '--verbose', action='store_true', help='Show full details')
+    p1.add_argument('--full', action='store_true', help='Show full content without truncation')
+    p1.add_argument('--format', '-f', choices=['auto', 'table', 'list', 'json', 'detail'],
+                    help='Output format (overrides config)')
+
+    # endorse command
+    p2 = subparsers.add_parser('endorse', help='Endorse a decision (P9: consensus)')
+    p2.add_argument('decision_id', help='Decision ID (or prefix) to endorse')
+    p2.add_argument('--comment', '-c', help='Optional comment on why endorsing')
+
+    # evidence-decision command
+    p3 = subparsers.add_parser('evidence-decision', help='Add evidence to a decision (P9: grounding)')
+    p3.add_argument('decision_id', help='Decision ID (or prefix)')
+    p3.add_argument('content', help='The evidence')
+    p3.add_argument('--type', dest='evidence_type', default='observation',
+                    choices=['observation', 'benchmark', 'user_feedback', 'outcome', 'other'],
+                    help='Type of evidence (default: observation)')
+
+    return p1, p2, p3
+
+
+def handle(cli, args):
+    """Handle validation, endorse, or evidence-decision command dispatch."""
+    if args.command == 'validation':
+        cli._validation_cmd.validation_cmd(
+            decision_id=args.decision_id,
+            verbose=args.verbose,
+            full=args.full,
+            output_format=getattr(args, 'format', None)
+        )
+    elif args.command == 'endorse':
+        cli._validation_cmd.endorse(
+            args.decision_id,
+            comment=args.comment
+        )
+    elif args.command == 'evidence-decision':
+        cli._validation_cmd.evidence_decision(
+            args.decision_id,
+            args.content,
+            evidence_type=args.evidence_type
+        )

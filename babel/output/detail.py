@@ -67,8 +67,7 @@ class DetailRenderer(BaseRenderer):
         elif item_type or item_id:
             header = item_type.title() if item_type else "Item"
             if item_id:
-                short_id = item_id[:8] if len(item_id) > 8 else item_id
-                header += f" [{short_id}]"
+                header += f" {self.format_id(item_id)}"
             lines.append(f"\n{header}")
 
         # Summary quote

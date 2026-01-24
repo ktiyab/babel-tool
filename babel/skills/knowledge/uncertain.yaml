@@ -1,0 +1,167 @@
+name: uncertain
+category: knowledge
+description: Capture uncertainty explicitly. Hold ambiguity rather than pretending to know. Questions surface at session start via babel questions. Prevents premature decisions that get revised later.
+
+trigger: User expresses uncertainty, decision cannot be made yet (missing information), external dependency blocks decision
+
+commands:
+  - 'babel question "What we don''t know yet - depends on X" --batch'
+  - 'babel resolve-question <id> "What we decided and why"'
+
+principles:
+  - P6 (Uncertainty as Information) - Not knowing is valid state
+  - HC2 (Human Authority) - Human decides when to resolve
+
+uses_context:
+  - Current decision being discussed
+  - Dependencies mentioned by user
+  - Trade-offs where no clear winner exists
+  - Blocking factors (external info, stakeholder input)
+
+produces:
+  - Captured question with ID (queued)
+  - Surfaces in babel questions at session start
+  - Explicit placeholder preventing premature decision
+
+composable_with:
+  - orient (questions surface at session start)
+  - remember (resolution may trigger decision capture)
+  - challenge (uncertain is valid resolution outcome)
+
+always_load: false
+load_on_demand: true
+user_invocable: true
+
+examples:
+  - |
+    ## FLOW 7: UNCERTAIN — Hold Ambiguity Explicitly
+
+    Capture uncertainty instead of pretending to know.
+    **Don't pretend to decide. Wait.**
+
+  - |
+    ### Trigger Patterns
+
+    Capture when you detect:
+
+    | Pattern | Example |
+    |---------|---------|
+    | "I'm not sure if..." | "I'm not sure if we should use REST or GraphQL" |
+    | "We need to figure out..." | "We need to figure out the auth strategy" |
+    | "Let's decide later..." | "Let's decide later when we know more" |
+    | "It depends on..." | "It depends on the client requirements" |
+    | "We don't know yet..." | "We don't know yet what the API will look like" |
+    | "That's still unclear..." | "That's still unclear until stakeholder review" |
+
+  - |
+    ### Why Capture Uncertainty
+
+    | Without Capturing | With Capturing |
+    |-------------------|----------------|
+    | AI guesses, makes premature decision | Uncertainty explicitly held |
+    | Later revised when reality emerges | Surfaces in `babel questions` at session start |
+    | Wasted implementation effort | Prevents building on shaky foundation |
+    | "Why did we build X if we weren't sure?" | Makes explicit what we're waiting for |
+
+    **Uncertainty is information, not weakness.**
+
+  - |
+    ### Question Format
+
+    ```
+    [What is unknown] - [What it depends on]
+    ```
+
+    **Good:** `"API style: REST vs GraphQL - depends on client requirements"`
+
+    **Bad:** `"API decision"`
+
+  - |
+    ### AI Behavior (CRITICAL)
+
+    **WRONG:**
+    ```
+    User: "I'm not sure if we should use REST or GraphQL"
+    AI: "Based on typical patterns, REST is usually better for..."
+    # ← Pretending to know, making premature decision
+    ```
+
+    **RIGHT:**
+    ```
+    User: "I'm not sure if we should use REST or GraphQL"
+    AI: "I've captured this uncertainty:
+
+         [QUESTION] API style: REST vs GraphQL - depends on client requirements
+
+         This will surface in future sessions until resolved.
+         Review pending: `babel review`"
+    # ← Then WAIT. Don't pretend to decide.
+    ```
+
+  - |
+    ### Lifecycle
+
+    ```
+    question → [wait] → resolve-question
+    ```
+
+    The `[wait]` is explicit — do NOT rush to resolve.
+
+    **Resolution triggers:**
+    - Unknown becomes known
+    - External dependency clarified
+    - User makes deferred decision
+    - Evidence makes one option clearly better
+
+  - |
+    ### Complete Example
+
+    ```bash
+    # User: "I'm not sure if we should use REST or GraphQL"
+    babel question "API style: REST vs GraphQL - depends on client requirements" --batch
+
+    # [wait] - Time passes, user gathers information
+
+    # Later, when decided:
+    babel resolve-question <id> "Chose REST because mobile clients need simple caching"
+    ```
+
+  - |
+    ### When Resolution Triggers Decision Capture
+
+    If the resolution is a significant decision, follow with /remember:
+
+    ```bash
+    babel resolve-question <id> "Chose REST for mobile caching"
+    babel capture "Using REST API because mobile clients need simple HTTP caching and offline support" --batch
+    ```
+
+  - |
+    ### Also Used In: Challenge Flow
+
+    When challenging a decision and evidence is inconclusive:
+
+    ```bash
+    babel resolve <id> --outcome uncertain --force --resolution "Need production metrics before deciding"
+    ```
+
+    This holds the challenge open rather than forcing premature resolution.
+    See `/challenge` and `/tension` skills.
+
+  - |
+    ### Consequence of Skipping
+
+    | Skip Uncertainty Capture | Result |
+    |-------------------------|--------|
+    | Premature decisions | Made without full information |
+    | Later revisions | Reality emerges, requires rework |
+    | Wasted effort | Built on shaky foundation |
+    | Trust erosion | "Why did we build X if we weren't sure?" |
+
+  - |
+    ### The Rule
+
+    ```
+    Don't pretend to decide. Wait.
+    Uncertainty captured is uncertainty managed.
+    ```

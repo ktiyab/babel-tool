@@ -1,0 +1,204 @@
+name: init-memo
+category: preference
+description: Save foundational instructions. Critical rules that surface at EVERY session start via babel status. Non-negotiable constraints AI must see before any work. Different from regular memos which are context-aware.
+
+trigger: Critical rule stated by user, foundational instruction defined, non-negotiable constraint established, existing memo needs promotion to foundational
+
+commands:
+  - babel memo "instruction" --init
+  - babel memo --list-init
+  - babel memo --promote-init <id>
+  - babel memo --demote-init <id>
+  - babel memo --update <id> "new content"
+  - babel memo --remove <id>
+
+principles:
+  - P7 (Reasoning Travels) - Foundational rules persist across sessions
+  - HC2 (Human Authority) - User decides what's foundational
+
+uses_context:
+  - Critical rule stated by user
+  - Existing memos that should be promoted to foundational
+
+produces:
+  - Init memo (surfaces at top of babel status)
+  - Foundational rule visible at every session start
+  - Non-negotiable constraint AI cannot miss
+
+composable_with:
+  - preference (init-memo is a subset of preference system)
+  - orient (init memos surface during orient via status)
+
+always_load: true
+load_on_demand: false
+user_invocable: true
+
+examples:
+  - |
+    ## Init Memos — Foundational Instructions
+
+    Critical rules that surface at EVERY session start.
+
+    **Why Init Memos Matter:**
+    - Foundational rules AI must see before ANY work
+    - Displayed at top of `babel status` output
+    - Cannot be missed during orient phase
+    - Non-negotiable constraints regardless of task context
+
+  - |
+    ### Init vs Regular Memos
+
+    | Type | When It Surfaces | Use Case | Example |
+    |------|------------------|----------|---------|
+    | **Regular memo** | Context-aware (via `--context`) | Operational preferences | `"Use pytest for testing" --context testing` |
+    | **Init memo** | Always at session start | Non-negotiable rules | `"Never bypass babel to database" --init` |
+
+    **Key Difference:**
+    - Regular memos surface only when context matches
+    - Init memos surface EVERY session, regardless of task
+
+  - |
+    ### Command Reference
+
+    ```bash
+    # CREATE init memo
+    babel memo "instruction" --init
+
+    # LIST only init memos
+    babel memo --list-init
+
+    # PROMOTE regular memo to init
+    babel memo --promote-init <id>
+
+    # DEMOTE init memo back to regular
+    babel memo --demote-init <id>
+
+    # UPDATE memo content (preserves init status)
+    babel memo --update <id> "new content"
+
+    # REMOVE memo
+    babel memo --remove <id>
+    ```
+
+  - |
+    ### When to Suggest Init Memo
+
+    **Trigger patterns — suggest `--init` when user says:**
+
+    | Pattern | Example |
+    |---------|---------|
+    | "Always..." | "Always use python3 not python" |
+    | "Never..." | "Never commit without tests" |
+    | "Critical rule:" | "Critical rule: no direct database access" |
+    | "Non-negotiable:" | "Non-negotiable: all APIs must auth" |
+    | "Must follow:" | "Must follow: code review before merge" |
+
+    **Response:** Suggest `babel memo "..." --init`
+
+  - |
+    ### How Init Memos Surface
+
+    ```bash
+    babel status
+    # Output includes at top:
+    # 📌 Init Memos:
+    #   [m_abc123] Never bypass babel to use database directly
+    #   [m_def456] All API endpoints must validate auth
+    #
+    # ◎ Purpose: ...
+    # ... rest of status output
+    ```
+
+    **Init memos appear BEFORE purpose in status output.**
+
+  - |
+    ### Example Workflow
+
+    ```bash
+    # 1. User states a critical rule
+    User: "Never bypass babel to access the database directly"
+
+    # 2. AI captures as init memo
+    babel memo "Never bypass babel to access database directly" --init
+    # → [m_abc123] created as init memo
+
+    # 3. Every future session start:
+    babel status
+    # → 📌 Init Memos:
+    # →   [m_abc123] Never bypass babel to access database directly
+    ```
+
+  - |
+    ### Promoting and Demoting
+
+    ```bash
+    # Existing regular memo needs to become foundational
+    babel memo --list
+    # → [m_xyz789] Use python3 not python (regular)
+
+    # Promote to init
+    babel memo --promote-init m_xyz789
+    # → Now surfaces at every session start
+
+    # Later, if rule no longer critical
+    babel memo --demote-init m_xyz789
+    # → Now context-aware again (regular memo)
+    ```
+
+  - |
+    ### Updating Init Memos
+
+    ```bash
+    # Update content while preserving init status
+    babel memo --update m_abc123 "Updated: Never access database directly, use babel commands only"
+    # → Content changed, still an init memo
+    ```
+
+    **Note:** `--update` preserves init/regular status.
+
+  - |
+    ### Non-Interactive (AI-Safe)
+
+    All init memo commands are non-interactive — safe for AI operators:
+
+    ```bash
+    babel memo "instruction" --init       # Add init (no prompt)
+    babel memo --promote-init m_abc123    # Promote to init (no prompt)
+    babel memo --demote-init m_abc123     # Demote from init (no prompt)
+    babel memo --list-init                # List init only (no prompt)
+    babel memo --update m_abc123 "new"    # Update (no prompt)
+    babel memo --remove m_abc123          # Remove (no prompt)
+    ```
+
+    **No interactive prompts that would cause EOF errors.**
+
+  - |
+    ### Example Init Memos
+
+    **Security:**
+    - "Never commit credentials or secrets"
+    - "All API endpoints must validate authentication"
+
+    **Babel workflow:**
+    - "Never bypass babel to use database directly"
+    - "Always run babel coherence after implementation"
+
+    **Code standards:**
+    - "Tests must pass before any commit"
+    - "Use python3 not python"
+
+    **Team policies:**
+    - "Code review required before merge to main"
+    - "Document breaking changes in CHANGELOG"
+
+  - |
+    ### Consequence of Skipping
+
+    | Skip | Result |
+    |------|--------|
+    | Don't create init memo for critical rule | AI may miss rule, violate constraint |
+    | Use regular memo for non-negotiable | Rule surfaces only in specific context |
+    | Skip `babel status` at session start | Init memos not seen |
+
+    **Rule:** Foundational rules = init memos. Context-specific = regular memos.
+

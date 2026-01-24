@@ -29,14 +29,37 @@ class StatusCommand(BaseCommand):
     Multi-factor health scoring: maturity, alignment, confusion.
     """
 
-    def status(self, full: bool = False, git: bool = False):
+    def status(self, full: bool = False, git: bool = False, force: bool = False,
+               format: str = "auto", limit_purposes: int = 10):
         """
         Show project status.
 
         Args:
             full: If True, show full content without truncation
             git: If True, show git-babel sync health
+            force: If True, bypass cache and force fresh data reads
+            format: Output format - "auto", "json", "table", "list", "summary"
+            limit_purposes: Max recent purposes to show (default 10, 0 for all)
         """
+        # Clear caches if force flag is set
+        if force:
+            self.events.clear_cache()
+
+        # For JSON format, collect structured data and render via output system
+        if format == "json":
+            data = self._collect_status_data(full=full, git=git)
+            from ..output import OutputSpec, render
+            spec = OutputSpec(
+                data=data,
+                shape="detail",
+                title="Project Status",
+                command="status"
+            )
+            output = render(spec, format="json", symbols=self.symbols, full=full)
+            print(output)
+            return
+
+        # For other formats, use existing print-based output (backward compatible)
         stats = self.graph.stats()
         shared_count, local_count = self.events.count_by_scope()
         total_events = shared_count + local_count
@@ -64,10 +87,19 @@ class StatusCommand(BaseCommand):
                 print(f"  Action: babel link <id> --to <related-id>")
 
         # Show purposes with symbols (formatted, never raw JSON)
-        purposes = self.graph.get_nodes_by_type('purpose')
+        # Use time-ordered query for recent purposes (P6: token efficiency)
+        all_purposes_count = len(self.graph.get_nodes_by_type('purpose'))
+        if limit_purposes > 0:
+            purposes = self.graph.get_nodes_by_type_recent('purpose', limit=limit_purposes)
+        else:
+            purposes = self.graph.get_nodes_by_type('purpose')
         if purposes:
             for p in purposes:
                 self._display_purpose(p.content, full=full)
+            # Show truncation hint if there are more purposes
+            if limit_purposes > 0 and all_purposes_count > limit_purposes:
+                print(f"\n  ({all_purposes_count - limit_purposes} older purposes hidden)")
+                print(f"  {symbols.arrow} babel list purposes --all")
 
         # Show coherence status
         last_result = self.coherence.get_last_result()
@@ -188,7 +220,8 @@ class StatusCommand(BaseCommand):
         from ..output import end_command
         end_command("status", {
             "has_pending": pending_proposals > 0,
-            "has_unlinked": orphans > 0,
+            "has_high_unlinked": orphans > 50,  # Likely from map indexing garbage
+            "has_unlinked": orphans > 0 and orphans <= 50,
             "has_tensions": open_tensions > 0,
             "has_questions": open_questions_count > 0,
             "has_partial_validation": validation_stats.get("partial", 0) > 0,
@@ -242,7 +275,8 @@ class StatusCommand(BaseCommand):
         """
         Count proposals awaiting confirmation.
 
-        STRUCTURE_PROPOSED events without matching ARTIFACT_CONFIRMED.
+        STRUCTURE_PROPOSED events without matching ARTIFACT_CONFIRMED
+        and without PROPOSAL_REJECTED.
         These are AI insights the user hasn't reviewed yet.
         """
         proposed = self.events.read_by_type(EventType.STRUCTURE_PROPOSED)
@@ -256,8 +290,15 @@ class StatusCommand(BaseCommand):
             if proposal_id:
                 confirmed_ids.add(proposal_id)
 
-        # Count unconfirmed proposals
-        pending = sum(1 for p in proposed if p.id not in confirmed_ids)
+        # Get all rejected proposal IDs
+        rejected_ids = set()
+        for event in self.events.read_by_type(EventType.PROPOSAL_REJECTED):
+            proposal_id = event.data.get('proposal_id', '')
+            if proposal_id:
+                rejected_ids.add(proposal_id)
+
+        # Count unconfirmed and non-rejected proposals
+        pending = sum(1 for p in proposed if p.id not in confirmed_ids and p.id not in rejected_ids)
         return pending
 
     def _compute_project_health(
@@ -479,3 +520,163 @@ class StatusCommand(BaseCommand):
             print(f"  {symbols.arrow} Run: babel suggest-links (AI suggestions)")
         else:
             print(f"\n  {symbols.arrow} Run: babel gaps (detailed view)")
+
+    def _collect_status_data(self, full: bool = False, git: bool = False) -> dict:
+        """
+        Collect status data as structured dict for JSON rendering.
+
+        Returns dict with all status metrics suitable for machine consumption.
+        Used by --format json for AI operator token efficiency.
+        """
+        stats = self.graph.stats()
+        shared_count, local_count = self.events.count_by_scope()
+
+        # Core metrics
+        data = {
+            "project": str(self.project_dir),
+            "events": {
+                "total": shared_count + local_count,
+                "shared": shared_count,
+                "local": local_count
+            },
+            "artifacts": stats["nodes"],
+            "connections": stats["edges"],
+            "orphans": stats["orphans"]
+        }
+
+        # Init memos (code only - ID hidden behind alias)
+        codec = self._cli.codec
+        init_memos = self._cli.memos.list_init_memos()
+        if init_memos:
+            data["init_memos"] = [
+                {"code": codec.encode(m.id), "content": m.content}
+                for m in init_memos
+            ]
+
+        # Purposes (code only - ID hidden behind alias)
+        purposes = self.graph.get_nodes_by_type('purpose')
+        if purposes:
+            data["purposes"] = [
+                {
+                    "code": codec.encode(p.id),
+                    "summary": p.content.get("summary") or p.content.get("purpose", ""),
+                    "goal": p.content.get("detail", {}).get("goal") if isinstance(p.content.get("detail"), dict) else None
+                }
+                for p in purposes
+            ]
+
+        # Coherence
+        last_result = self.coherence.get_last_result()
+        if last_result:
+            # timestamp may be str or datetime, handle both
+            ts = last_result.timestamp if hasattr(last_result, 'timestamp') else None
+            if ts and hasattr(ts, 'isoformat'):
+                ts = ts.isoformat()
+            data["coherence"] = {
+                "checked": True,
+                "has_issues": last_result.has_issues,
+                "timestamp": ts
+            }
+
+        # Commits
+        commits = self.events.read_by_type(EventType.COMMIT_CAPTURED)
+        data["commits_captured"] = len(commits) if commits else 0
+
+        # Tensions
+        open_tensions = self.tensions.count_open()
+        data["open_tensions"] = open_tensions
+
+        # Validation
+        validation_stats = self.validation.stats()
+        data["validation"] = {
+            "tracked": validation_stats.get("tracked", 0),
+            "validated": validation_stats.get("validated", 0),
+            "partial": validation_stats.get("partial", 0),
+            "groupthink_risk": validation_stats.get("groupthink_risk", 0),
+            "unreviewed_risk": validation_stats.get("unreviewed_risk", 0)
+        }
+
+        # Questions
+        data["open_questions"] = self.questions.count_open()
+
+        # Pending proposals
+        data["pending_proposals"] = self._count_pending_proposals()
+
+        # Extraction queue
+        if self.extractor.queue:
+            data["extraction_queue"] = self.extractor.queue.count()
+
+        # Provider status
+        data["provider"] = get_provider_status(self.config)
+
+        # Git sync (if requested)
+        if git:
+            git_integration = GitIntegration(self.project_dir)
+            if git_integration.is_git_repo:
+                commit_links = CommitLinkStore(self.babel_dir)
+                data["git_sync"] = {
+                    "hooks_installed": git_integration.hooks_status() == "Installed",
+                    "decision_commit_links": commit_links.count()
+                }
+
+        # Health
+        principle_checker = PrincipleChecker(
+            graph=self.graph,
+            validation=self.validation,
+            questions=self.questions,
+            vocabulary=self.vocabulary
+        )
+        principle_result = principle_checker.check_all()
+        health = self._compute_project_health(
+            open_tensions=open_tensions,
+            validation_stats=validation_stats,
+            open_questions=data["open_questions"],
+            coherence_result=last_result,
+            principle_result=principle_result
+        )
+        data["health"] = {
+            "level": health["level"],
+            "principles_satisfied": principle_result.satisfied_count,
+            "principles_total": principle_result.total_applicable
+        }
+
+        # Note: codes are deterministic (hash-based) - no legend needed
+        # Any code can be resolved by computing hash(id) for candidates
+
+        return data
+
+
+# =============================================================================
+# Command Registration (Self-Registration Pattern)
+# =============================================================================
+
+def register_parser(subparsers):
+    """Register status command parser."""
+    p = subparsers.add_parser(
+        'status',
+        help='Show project status and health',
+        description='Display project overview: events, artifacts, recent purposes, '
+                    'coherence status, and health assessment. Purposes are shown in '
+                    'time order (newest first) with configurable limit.'
+    )
+    p.add_argument('--full', action='store_true',
+                   help='Show full content without truncation')
+    p.add_argument('--git', action='store_true',
+                   help='Show git-babel sync health (decision↔commit links)')
+    p.add_argument('--force', action='store_true',
+                   help='Bypass cache and force fresh data reads')
+    p.add_argument('--format', '-f', choices=['auto', 'table', 'list', 'json', 'summary'],
+                   help='Output format (overrides config)')
+    p.add_argument('--limit-purposes', type=int, default=10, metavar='N',
+                   help='Show N most recent purposes (default: 10). '
+                        'Use 0 to show all. Older purposes available via: babel list purposes')
+    return p
+
+
+def handle(cli, args):
+    """Handle status command dispatch."""
+    force = getattr(args, 'force', False)
+    format_arg = getattr(args, 'format', 'auto')
+    limit_purposes = getattr(args, 'limit_purposes', 10)
+    cli._status_cmd.status(full=args.full, git=args.git, force=force,
+                           format=format_arg, limit_purposes=limit_purposes)

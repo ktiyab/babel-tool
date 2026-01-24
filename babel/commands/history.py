@@ -54,26 +54,27 @@ class HistoryCommand(BaseCommand):
             # Human-friendly formatting (HC6)
             # Dual-Display: [ID] + readable description for comprehension AND action
             timestamp = event.timestamp[:10]  # Just date
-            event_id = event.id[:8]
+            formatted_id = self._cli.format_id(event.id)
 
             if event.type == EventType.CONVERSATION_CAPTURED:
                 preview = event.data.get('content', '')[:40]
-                print(f"  {scope_marker} {timestamp} [{event_id}] Captured: \"{preview}...\"")
+                print(f"  {scope_marker} {timestamp} {formatted_id} Captured: \"{preview}...\"")
             elif event.type == EventType.PURPOSE_DECLARED:
-                print(f"  {scope_marker} {timestamp} [{event_id}] Purpose: {event.data.get('purpose', '')[:40]}")
+                print(f"  {scope_marker} {timestamp} {formatted_id} Purpose: {event.data.get('purpose', '')[:40]}")
             elif event.type == EventType.ARTIFACT_CONFIRMED:
                 artifact_type = event.data.get('artifact_type', 'artifact')
-                print(f"  {scope_marker} {timestamp} [{event_id}] Confirmed: {artifact_type}")
+                print(f"  {scope_marker} {timestamp} {formatted_id} Confirmed: {artifact_type}")
             elif event.type == EventType.COMMIT_CAPTURED:
                 hash_short = event.data.get('hash', '')[:8]
                 message = event.data.get('message', '')[:35]
-                print(f"  {scope_marker} {timestamp} [{event_id}] Commit: [{hash_short}] {message}")
+                print(f"  {scope_marker} {timestamp} {formatted_id} Commit: [{hash_short}] {message}")
             elif event.type == EventType.EVENT_PROMOTED:
-                promoted_id = event.data.get('promoted_id', '')[:8]
-                print(f"  {scope_marker} {timestamp} [{event_id}] Promoted: {promoted_id}")
+                promoted_id = event.data.get('promoted_id', '')
+                promoted_alias = self._cli.codec.encode(promoted_id) if promoted_id else ''
+                print(f"  {scope_marker} {timestamp} {formatted_id} Promoted: {promoted_alias}")
             else:
                 type_display = event.type.value.replace('_', ' ').title()
-                print(f"  {scope_marker} {timestamp} [{event_id}] {type_display}")
+                print(f"  {scope_marker} {timestamp} {formatted_id} {type_display}")
 
         # Succession hint (centralized)
         from ..output import end_command
@@ -97,14 +98,16 @@ class HistoryCommand(BaseCommand):
                 message = event.data.get('message', '')[:35]
                 description = f"Commit: [{hash_short}] {message}"
             elif event.type == EventType.EVENT_PROMOTED:
-                description = f"Promoted: {event.data.get('promoted_id', '')[:8]}"
+                promoted_id = event.data.get('promoted_id', '')
+                promoted_alias = self._cli.codec.encode(promoted_id) if promoted_id else ''
+                description = f"Promoted: {promoted_alias}"
             else:
                 description = event.type.value.replace('_', ' ').title()
 
             rows.append({
                 "scope": "S" if event.is_shared else "L",
                 "date": event.timestamp[:10],
-                "id": event.id[:8],
+                "id": self._cli.codec.encode(event.id),
                 "type": event.type.value.replace('_', ' ').title()[:15],
                 "description": description
             })
@@ -139,14 +142,14 @@ class HistoryCommand(BaseCommand):
             local = self.events.read_local()[-5:]
             for e in local:
                 preview = self._event_preview(e)
-                print(f"  {e.id[:8]} | {preview}")
+                print(f"  {self._cli.format_id(e.id)} {preview}")
             return
 
         if len(matches) > 1:
             print(f"Multiple matches for '{event_id}':")
             for e in matches:
                 preview = self._event_preview(e)
-                print(f"  {e.id[:8]} | {preview}")
+                print(f"  {self._cli.format_id(e.id)} {preview}")
             print(f"\nBe more specific.")
             return
 
@@ -217,3 +220,34 @@ class HistoryCommand(BaseCommand):
         # Succession hint (centralized)
         from ..output import end_command
         end_command("sync", {})
+
+
+# =============================================================================
+# Command Registration (Self-Registration Pattern)
+# =============================================================================
+
+def register_parser(subparsers):
+    """Register history command parser."""
+    p = subparsers.add_parser('history', help='Show recent activity')
+    p.add_argument('-n', type=int, default=10, help='Number of events')
+    p.add_argument('--shared', action='store_true', help='Show only shared events')
+    p.add_argument('--local', action='store_true', help='Show only local events')
+    p.add_argument('--format', '-f', choices=['auto', 'table', 'list', 'json'],
+                   help='Output format (overrides config)')
+    return p
+
+
+def handle(cli, args):
+    """Handle history command dispatch."""
+    # Convert shared/local flags to scope_filter
+    scope_filter = None
+    if args.shared:
+        scope_filter = "shared"
+    elif args.local:
+        scope_filter = "local"
+
+    cli._history_cmd.history(
+        limit=args.n,
+        scope_filter=scope_filter,
+        output_format=getattr(args, 'format', None)
+    )

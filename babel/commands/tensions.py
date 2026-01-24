@@ -89,8 +89,9 @@ class TensionsCommand(BaseCommand):
         )
 
         domain_tag = f" [{domain}]" if domain else ""
-        print(f"\n{symbols.tension} Challenge raised [{challenge.id[:8]}]{domain_tag}")
-        print(f"  Against: {target_node.type} [{target_node.id[:8]}]")
+        challenge_code = self._cli.codec.encode(challenge.id)
+        print(f"\n{symbols.tension} Challenge raised {self._cli.format_id(challenge.id)}{domain_tag}")
+        print(f"  Against: {target_node.type} {self._cli.format_id(target_node.id)}")
         print(f"  Reason: {reason}")
 
         if hypothesis:
@@ -98,8 +99,8 @@ class TensionsCommand(BaseCommand):
         if test:
             print(f"  Test: {test}")
 
-        print(f"\n{symbols.arrow} Add evidence: babel evidence {challenge.id[:8]} \"what you learned\"")
-        print(f"{symbols.arrow} Resolve: babel resolve {challenge.id[:8]} --outcome confirmed|revised|synthesized")
+        print(f"\n{symbols.arrow} Add evidence: babel evidence {challenge_code} \"what you learned\"")
+        print(f"{symbols.arrow} Resolve: babel resolve {challenge_code} --outcome confirmed|revised|synthesized")
 
         # Succession hint (centralized)
         from ..output import end_command
@@ -125,11 +126,11 @@ class TensionsCommand(BaseCommand):
             if open_challenges:
                 print("\nOpen challenges:")
                 for c in open_challenges[:5]:
-                    print(f"  {c.id[:8]} | {c.reason[:40]}")
+                    print(f"  {self._cli.codec.encode(c.id)} | {c.reason[:40]}")
             return
 
         if challenge.status == "resolved":
-            print(f"Challenge [{challenge_id[:8]}] is already resolved.")
+            print(f"Challenge {self._cli.format_id(challenge_id)} is already resolved.")
             return
 
         success = self.tensions.add_evidence(
@@ -140,12 +141,13 @@ class TensionsCommand(BaseCommand):
 
         if success:
             evidence_count = len(challenge.evidence) + 1
-            print(f"Evidence added to [{challenge.id[:8]}] ({evidence_count} total)")
+            challenge_code = self._cli.codec.encode(challenge.id)
+            print(f"Evidence added to {self._cli.format_id(challenge.id)} ({evidence_count} total)")
             print(f"  Type: {evidence_type}")
             print(f"  Content: {content[:60]}...")
 
             if challenge.hypothesis:
-                print(f"\n{symbols.arrow} When ready: babel resolve {challenge.id[:8]} --outcome confirmed|revised|synthesized")
+                print(f"\n{symbols.arrow} When ready: babel resolve {challenge_code} --outcome confirmed|revised|synthesized")
 
             # Succession hint (centralized)
             from ..output import end_command
@@ -181,7 +183,7 @@ class TensionsCommand(BaseCommand):
             return
 
         if challenge.status == "resolved":
-            print(f"Challenge [{challenge_id[:8]}] is already resolved.")
+            print(f"Challenge {self._cli.format_id(challenge_id)} is already resolved.")
             if challenge.resolution:
                 print(f"  Outcome: {challenge.resolution['outcome']}")
                 print(f"  Resolution: {challenge.resolution['resolution']}")
@@ -217,7 +219,7 @@ class TensionsCommand(BaseCommand):
 
         # Prompt for resolution if not provided
         if not resolution:
-            print(f"\nResolving challenge [{challenge.id[:8]}]")
+            print(f"\nResolving challenge {self._cli.format_id(challenge.id)}")
             print(f"  Reason: {challenge.reason}")
             if challenge.hypothesis:
                 print(f"  Hypothesis: {challenge.hypothesis}")
@@ -266,7 +268,7 @@ class TensionsCommand(BaseCommand):
             }
             icon = outcome_icons.get(outcome, symbols.validated)
 
-            print(f"\n{icon} Challenge resolved [{challenge.id[:8]}]")
+            print(f"\n{icon} Challenge resolved {self._cli.format_id(challenge.id)}")
             print(f"  Outcome: {outcome}")
             print(f"  Resolution: {resolution}")
 
@@ -314,7 +316,7 @@ class TensionsCommand(BaseCommand):
         # Succession hint (centralized)
         from ..output import end_command
         has_open = self.tensions.count_open() > 0
-        end_command("tensions", {"has_open": has_open})
+        end_command("tensions", {"has_tensions": has_open, "no_tensions": not has_open})
 
         # Option 3: Contextual P10 hint when no tensions AND no questions
         if not has_open:
@@ -336,14 +338,14 @@ class TensionsCommand(BaseCommand):
         for challenge in open_challenges:
             # Get target info
             target_node = self._cli._find_node_by_id(challenge.target_id) if hasattr(self, '_cli') else None
-            target_summary = target_node.content.get('summary', '')[:30] if target_node else challenge.target_id[:8]
+            target_summary = target_node.content.get('summary', '')[:30] if target_node else self._cli.codec.encode(challenge.target_id)
 
             # Evidence status
             evidence_count = len(challenge.evidence) if challenge.evidence else 0
             hypothesis_status = "untested" if challenge.hypothesis and evidence_count == 0 else f"{evidence_count} ev." if evidence_count > 0 else "-"
 
             rows.append({
-                "id": challenge.id[:8],
+                "id": self._cli.codec.encode(challenge.id),
                 "target": target_summary,
                 "status": challenge.status,
                 "reason": challenge.reason[:40] if challenge.reason else "",
@@ -396,12 +398,13 @@ class TensionsCommand(BaseCommand):
         parent_id = challenge.parent_id
 
         # Non-interactive mode: just show the hint without prompting
+        parent_alias = self._cli.codec.encode(parent_id)
         if batch or not self._is_interactive():
-            print(f"\n  P8: Evolution link available from [{parent_id[:8]}]")
-            print(f"  To link: babel link <new_artifact_id> {parent_id[:8]}")
+            print(f"\n  P8: Evolution link available from {self._cli.format_id(parent_id)}")
+            print(f"  To link: babel link <new_artifact_id> {parent_alias}")
             return
 
-        print(f"\n  P8: Track evolution from original [{parent_id[:8]}]?")
+        print(f"\n  P8: Track evolution from original {self._cli.format_id(parent_id)}?")
         print(f"  This creates an evolves_from link for traceability.")
         print()
 
@@ -410,7 +413,7 @@ class TensionsCommand(BaseCommand):
         if recent_decisions:
             print("  Recent decisions that might supersede the original:")
             for i, (node_id, summary) in enumerate(recent_decisions, 1):
-                print(f"    {i}. [{node_id[:8]}] {summary[:50]}")
+                print(f"    {i}. {self._cli.format_id(node_id)} {summary[:50]}")
             print()
             try:
                 choice = input("  Enter number to link, or [S]kip: ").strip().lower()
@@ -439,7 +442,7 @@ class TensionsCommand(BaseCommand):
                     self.events.append(evolution_event)
 
                     print(f"\n  {symbols.check_pass} Evolution link created:")
-                    print(f"    [{new_id[:8]}] evolves_from [{parent_id[:8]}]")
+                    print(f"    {self._cli.format_id(new_id)} evolves_from {self._cli.format_id(parent_id)}")
                     return
             except ValueError:
                 pass
@@ -463,7 +466,7 @@ class TensionsCommand(BaseCommand):
             )
             self.events.append(evolution_event)
             print(f"\n  {symbols.check_pass} Evolution link created:")
-            print(f"    [{node.id[:8]}] evolves_from [{parent_id[:8]}]")
+            print(f"    {self._cli.format_id(node.id)} evolves_from {self._cli.format_id(parent_id)}")
         else:
             print(f"  Could not find artifact: {new_id}")
 
@@ -512,3 +515,81 @@ Keep both under 100 characters."""
             pass
 
         return None
+
+
+# =============================================================================
+# Command Registration (Self-Registration Pattern)
+# =============================================================================
+
+# Multiple commands registered by this module
+COMMAND_NAMES = ['tensions', 'challenge', 'evidence', 'resolve']
+
+
+def register_parser(subparsers):
+    """Register tensions, challenge, evidence, and resolve command parsers."""
+    # tensions command
+    p1 = subparsers.add_parser('tensions', help='Show open tensions and challenges')
+    p1.add_argument('-v', '--verbose', action='store_true', help='Show full details')
+    p1.add_argument('--full', action='store_true', help='Show full content without truncation')
+    p1.add_argument('--format', '-f', choices=['auto', 'table', 'list', 'json'],
+                    help='Output format (overrides config)')
+
+    # challenge command
+    p2 = subparsers.add_parser('challenge', help='Challenge a decision (P4: disagreement as information)')
+    p2.add_argument('target_id', help='Decision ID (or prefix) to challenge')
+    p2.add_argument('reason', help='Why you disagree')
+    p2.add_argument('--hypothesis', '-H', help='Testable alternative claim')
+    p2.add_argument('--test', '-t', help='How to test the hypothesis')
+    p2.add_argument('--domain', '-d', help='Expertise domain (P3)')
+
+    # evidence command
+    p3 = subparsers.add_parser('evidence', help='Add evidence to an open challenge')
+    p3.add_argument('challenge_id', help='Challenge ID (or prefix)')
+    p3.add_argument('content', help='The evidence')
+    p3.add_argument('--type', dest='evidence_type', default='observation',
+                    choices=['observation', 'benchmark', 'user_feedback', 'other'],
+                    help='Type of evidence (default: observation)')
+
+    # resolve command
+    p4 = subparsers.add_parser('resolve', help='Resolve a challenge with outcome')
+    p4.add_argument('challenge_id', help='Challenge ID (or prefix)')
+    p4.add_argument('--outcome', '-o', required=True,
+                    choices=['confirmed', 'revised', 'synthesized', 'uncertain'],
+                    help='Resolution outcome (uncertain = P10 holding ambiguity)')
+    p4.add_argument('--resolution', '-r', help='What was decided (prompted if not provided)')
+    p4.add_argument('--evidence', '-e', dest='evidence_summary', help='Summary of evidence')
+    p4.add_argument('--force', '-f', action='store_true', help='Skip premature resolution warning')
+
+    return p1, p2, p3, p4
+
+
+def handle(cli, args):
+    """Handle tensions, challenge, evidence, or resolve command dispatch."""
+    if args.command == 'tensions':
+        cli._tensions_cmd.tensions_cmd(
+            verbose=args.verbose,
+            full=args.full,
+            output_format=getattr(args, 'format', None)
+        )
+    elif args.command == 'challenge':
+        cli._tensions_cmd.challenge(
+            args.target_id,
+            args.reason,
+            hypothesis=args.hypothesis,
+            test_method=args.test,
+            domain=args.domain
+        )
+    elif args.command == 'evidence':
+        cli._tensions_cmd.evidence(
+            args.challenge_id,
+            args.content,
+            evidence_type=args.evidence_type
+        )
+    elif args.command == 'resolve':
+        cli._tensions_cmd.resolve(
+            args.challenge_id,
+            outcome=args.outcome,
+            resolution=args.resolution,
+            evidence_summary=args.evidence_summary,
+            force=args.force
+        )

@@ -1,0 +1,212 @@
+name: strengthen
+category: validation
+description: Validate decisions with dual-test. Add consensus (endorse) AND evidence for solid decisions. Prevents groupthink by requiring both agreement and proof.
+trigger: Evidence available for decision, tests pass for implementation, user confirms decision works, metrics met for performance decisions, after review acceptance to solidify decision
+
+commands:
+  - babel endorse <id>                          # Add consensus (you agree)
+  - 'babel evidence-decision <id> "proof"'      # Add evidence (tests pass, metrics met)
+  - babel validation                            # Check what's validated vs unvalidated
+
+principles:
+  - P5 (Dual-Test Truth) - Requires BOTH consensus AND evidence
+
+uses_context:
+  - Decision to strengthen
+  - Evidence from testing/metrics/user confirmation
+  - Current validation state
+
+produces:
+  - Endorsed decision (consensus added)
+  - Evidence-backed decision (grounding added)
+  - Validation status update
+  - Progression toward ● Validated state
+
+composable_with:
+  - validate (strengthen after validation)
+  - remember (strengthen captured decisions)
+  - analyze (analysis provides evidence)
+
+always_load: false
+load_on_demand: true
+user_invocable: true
+
+examples:
+  - |
+    ## FLOW 8: STRENGTHEN — Validate Decisions with Consensus + Evidence
+
+    **The Rule (P5 Dual-Test Truth):**
+    Requires BOTH consensus AND evidence for solid decisions.
+
+    | Component | Purpose | Risk Without |
+    |-----------|---------|--------------|
+    | **Consensus** | Agreement that decision is correct | Unreviewed — may be wrong |
+    | **Evidence** | Proof that decision works | Groupthink — agreed but unproven |
+    | **Both** | Solid decision | Safe to build upon |
+
+  - |
+    ### Why Dual-Test Matters
+
+    | State | Problem |
+    |-------|---------|
+    | Consensus alone | Groupthink risk — everyone agrees, but no proof |
+    | Evidence alone | Needs review — proof exists, but not agreed upon |
+    | **Both** | Solid decision safe to build upon |
+
+    **Rule:** Agreement without proof = groupthink. Proof without agreement = unreviewed.
+
+  - |
+    ### Validation States
+
+    | Symbol | State | Meaning | Risk |
+    |--------|-------|---------|------|
+    | `○` | Proposed | Captured, not reviewed | Unvalidated — needs review |
+    | `◐` | Consensus | Endorsed but no evidence | Groupthink risk — agreement without proof |
+    | `◑` | Evidence | Evidence but no endorsement | Needs review — proof exists but not agreed |
+    | `●` | Validated | BOTH consensus AND evidence | Solid — safe to build upon |
+
+    **Target state:** `●` Validated for important decisions.
+
+  - |
+    ### Command Reference
+
+    ```bash
+    # Add consensus (you agree with the decision)
+    babel endorse <id>
+
+    # Add evidence (proof it works)
+    babel evidence-decision <id> "tests pass, metrics met"
+
+    # Check overall validation state
+    babel validation
+    ```
+
+  - |
+    ### When to Use Each Command
+
+    | Trigger | Command | Note |
+    |---------|---------|------|
+    | Agree with decision | `babel endorse <id>` | After reviewing, you agree |
+    | Have proof it works | `babel evidence-decision <id> "proof"` | Tests pass, metrics met |
+    | Check validation state | `babel validation` | Periodically |
+
+  - |
+    ### Complete Workflow Example
+
+    ```bash
+    # Scenario: Decision was "Use SQLite for offline storage"
+    # Tests pass, user confirmed it works
+
+    # Step 1: Endorse (you agree)
+    babel endorse a1b2c3d4
+
+    # Step 2: Add evidence (proof)
+    babel evidence-decision a1b2c3d4 "Offline tests pass, sync works under 100MB"
+
+    # Decision now ● Validated
+    ```
+
+  - |
+    ### Evidence Types
+
+    What counts as evidence:
+
+    | Type | Example |
+    |------|---------|
+    | Test results | "Unit tests pass", "Integration tests green" |
+    | Performance metrics | "Response time under 100ms", "Memory usage stable" |
+    | User confirmation | "User validated workflow works as expected" |
+    | Production data | "No errors in 7 days of production use" |
+    | Load testing | "Handles 1000 concurrent users" |
+
+    **Good evidence:** Specific, measurable, verifiable.
+    **Bad evidence:** "It seems to work", "Should be fine".
+
+  - |
+    ### Checking Validation Status
+
+    ```bash
+    babel validation
+    # Output:
+    # ● Validated: 15
+    # ◐ Consensus only: 3 (need evidence)
+    # ◑ Evidence only: 2 (need review)
+    # ○ Proposed: 5 (need both)
+    ```
+
+    **Action items:**
+    - `◐ Consensus only` → Add evidence
+    - `◑ Evidence only` → Review and endorse
+    - `○ Proposed` → Review, then add both
+
+  - |
+    ### Sequence in Workflow
+
+    Where STRENGTHEN fits in decision lifecycle:
+
+    ```
+    remember (capture) → validate (review) → connect (link) → strengthen (endorse + evidence)
+    ```
+
+    **Command lifecycle:**
+    ```
+    [decision captured] → endorse (consensus) → evidence-decision (proof) → [● Validated]
+    ```
+
+  - |
+    ### Connection to Other Flows
+
+    | Flow | Connection |
+    |------|------------|
+    | **VALIDATE** | After review acceptance, strengthen |
+    | **REMEMBER** | Strengthen captured decisions |
+    | **ANALYZE** | Analysis can provide evidence |
+    | **VERIFY** | Verification can trigger strengthen |
+
+  - |
+    ### Common Mistakes
+
+    | Mistake | Why It's Wrong | Fix |
+    |---------|----------------|-----|
+    | Endorse without reviewing | Rubber-stamping, not real consensus | Review first, then endorse |
+    | Vague evidence | "Works fine" doesn't prove anything | Specific: "tests pass", "metrics met" |
+    | Skip strengthen entirely | Decisions stay weak | Run `babel validation` periodically |
+    | Only endorse, skip evidence | Groupthink risk | Add evidence too |
+    | Only evidence, skip endorse | Unreviewed proof | Review and endorse |
+
+  - |
+    ### Consequence of Skipping
+
+    | Skip | Result |
+    |------|--------|
+    | Skip endorse | Decision has evidence but no agreement |
+    | Skip evidence | Decision has agreement but no proof |
+    | Skip both | Decision stays ○ Proposed, weak foundation |
+    | Skip validation check | Don't know what needs strengthening |
+
+    **Rule:** Decisions stay weak without dual-test validation.
+
+  - |
+    ### The Rule (Summary)
+
+    ```
+    DUAL-TEST TRUTH (P5):
+      Consensus alone = groupthink risk
+      Evidence alone = needs review
+      BOTH = ● Validated (solid)
+
+    WORKFLOW:
+      [decision exists] → endorse → evidence-decision → [● Validated]
+
+    COMMANDS:
+      babel endorse <id>                    # Agreement
+      babel evidence-decision <id> "proof"  # Proof
+      babel validation                      # Check status
+
+    CHECK PERIODICALLY:
+      babel validation
+      # Address ◐ (need evidence) and ◑ (need review)
+    ```
+
+    **Target: ● Validated for all important decisions.**
+

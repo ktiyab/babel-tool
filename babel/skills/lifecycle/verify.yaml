@@ -1,0 +1,227 @@
+name: verify
+category: lifecycle
+description: Verify alignment after changes. Rule #3 "Verify AFTER changes" to detect drift before it compounds. You are the coherence sensor — if you don't check, no one will. Drift is silent, you must detect it.
+
+trigger: After implementing changes, after bug fixes, after refactoring, multiple changes in session, user asks "check alignment" or "verify coherence", something feels off
+
+commands:
+  # Quick check
+  - babel coherence
+  # Detailed analysis
+  - babel coherence --full
+  # Resolution modes
+  - babel coherence --resolve
+  - babel coherence --resolve --batch
+  # When intentional change detected
+  - 'babel challenge <id> "new direction because..."'
+
+principles:
+  - P4 (Disagreement as Hypothesis) - Drift surfaces as testable claim
+  - P5 (Adaptive Cycle Rate) - Response speed based on drift severity
+
+uses_context:
+  - Captured decision being implemented
+  - Code changes made
+  - Purpose and constraints (for alignment check)
+  - Related artifacts (for connection verification)
+
+produces:
+  - Coherence status (aligned or drift detected)
+  - Drift identification with decision IDs
+  - Tension detection (auto-creates tensions if conflicts found)
+  - Low-alignment artifact identification
+
+composable_with:
+  - remember (verify after capture + implement cycle)
+  - challenge (when intentional drift → challenge chain)
+  - tension (coherence auto-detects tensions)
+  - revise (when drift requires artifact update)
+  - maintain (coherence is part of maintenance cycle)
+
+always_load: false
+load_on_demand: true
+user_invocable: true
+
+examples:
+  - |
+    ## Continuous Alignment Verification
+
+    **Rule #3:** Verify AFTER changes
+    **Consequence of Skip:** Drift accumulates silently until coherence collapses
+
+    The Living Cycle requires continuous coherence observation —
+    not just event-triggered checks.
+
+  - |
+    ### Trigger Table
+
+    | Trigger | Action | Why |
+    |---------|--------|-----|
+    | After AI implements | Verify against captured decision | Did code match intent? |
+    | After user modifies | Ask: "Should we verify alignment?" | Humans drift too |
+    | Multiple changes | Periodic `babel coherence` | Accumulated drift compounds |
+    | After bug fixes | Check: fix aligned with purpose? | "Make it work" ≠ "Keep it coherent" |
+    | After refactoring | Verify original intent preserved | Structure changed, did meaning survive? |
+
+  - |
+    ### Command Reference
+
+    ```bash
+    # Quick check (cached, fast)
+    babel coherence
+
+    # Detailed analysis (full artifact check)
+    babel coherence --full
+
+    # Resolution modes
+    babel coherence --resolve          # Interactive (for humans)
+    babel coherence --resolve --batch  # Non-interactive (for AI)
+    ```
+
+  - |
+    ### Coherence Symbols
+
+    | Symbol | Level | Meaning | Action |
+    |--------|-------|---------|--------|
+    | ◔ | High confusion | Many tensions, low alignment | Slow down, resolve tensions |
+    | ◐ | Moderate | Some open items | Address before major changes |
+    | ● | Aligned | Healthy state | Safe to proceed |
+
+  - |
+    ### Drift Detection Protocol
+
+    ```
+    WRONG: Implement → Move on → Drift accumulates silently
+    RIGHT: Implement → Verify coherence → Surface drift immediately
+    ```
+
+    **When you detect potential drift:**
+
+    1. **Surface immediately**
+       "This may have drifted from [decision ID]"
+
+    2. **Distinguish intentional vs accidental:**
+       - Intentional change → `babel challenge <id> "new direction because..."`
+       - Accidental drift → Fix the code or discuss with user
+
+    3. **Never ignore**
+       Unspoken drift compounds into incoherence
+
+  - |
+    ### AI Behavior (CRITICAL)
+
+    **WRONG:**
+    ```
+    [implements feature]
+    [moves to next task]
+    [drift unnoticed]
+    ```
+
+    **RIGHT:**
+    ```
+    [implements feature]
+    babel coherence
+    "Coherence check: ● Aligned with [decision ID]"
+    [moves to next task]
+    ```
+
+    **IF DRIFT DETECTED:**
+    ```
+    [implements feature]
+    babel coherence
+    "⚠ Potential drift detected from [a1b2c3d4] 'Use SQLite for offline'
+     Current implementation uses PostgreSQL.
+     Is this intentional? If yes, let's capture the change."
+    ```
+
+  - |
+    ### Verification Checklist (Per Implementation)
+
+    After ANY code change, verify:
+
+    - [ ] Changes respect the stated intent (not just technically work)?
+    - [ ] Removals traced — no regressions, no orphaned code?
+    - [ ] Related files considered and updated accordingly?
+    - [ ] Tests pass and cover the change?
+
+    **"Technically works" ≠ "Coherent with intent"**
+
+  - |
+    ### Connection to Tension Flow
+
+    `babel coherence` can auto-detect tensions between artifacts.
+
+    If conflicts found, they surface in `babel tensions` with severity:
+
+    | Symbol | Severity | Meaning |
+    |--------|----------|---------|
+    | 🔴 | Critical | Hard constraint violated |
+    | 🟡 | Warning | Potential conflict |
+    | 🟢 | Info | Minor tension |
+
+    **Flow:** coherence detects → tensions created → resolution needed
+
+  - |
+    ### Connection to Revise Flow
+
+    If `coherence --full` shows low alignment for multiple artifacts,
+    this may indicate the purpose or decision needs revision.
+
+    **Signal:** Multiple artifacts showing low alignment = scope drift
+
+    **Response:**
+    ```bash
+    babel challenge <id> "Artifact scope wrong because [observations]"
+    babel evidence <challenge_id> "observation 1"
+    babel evidence <challenge_id> "observation 2"
+    # ... build case, then resolve
+    ```
+
+    See `/revise` skill for formal revision chain (P4, P8).
+
+  - |
+    ### Triggers Other Flows
+
+    | Coherence Finds | Triggers Flow | Action |
+    |-----------------|---------------|--------|
+    | Conflict between artifacts | /tension | Tensions created with severity |
+    | Multiple low-alignment | /revise | Challenge chain needed |
+    | Orphaned artifacts | /connect | Linking needed |
+    | Missing context | /remember | Capture needed |
+
+  - |
+    ### Complete Verification Workflow
+
+    ```bash
+    # After implementing a feature
+    babel coherence
+
+    # If aligned:
+    # → "● Coherent with [decision ID]"
+    # → Proceed to next task
+
+    # If drift detected:
+    # → Surface to user
+    # → If intentional: babel challenge <id> "new direction"
+    # → If accidental: fix code or discuss
+
+    # If tensions auto-created:
+    babel tensions
+    # → Review and resolve per severity
+
+    # Periodic full check:
+    babel coherence --full
+    # → Shows all artifacts with alignment scores
+    ```
+
+  - |
+    ### The Rule
+
+    ```
+    You are the coherence sensor.
+    If you don't check, no one will.
+
+    ALWAYS: Implement → Verify → Surface drift immediately
+    NEVER:  Implement → Move on → Let drift compound
+    ```
+

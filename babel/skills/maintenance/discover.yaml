@@ -1,0 +1,236 @@
+name: discover
+category: maintenance
+description: Explore knowledge graph. Find artifacts, understand connections, identify orphans. Fast, offline, token-efficient graph access without LLM. Use instead of multiple babel why calls for graph exploration.
+
+trigger: Need to find artifacts by type or keyword, need to explore graph structure, need to understand what's connected to an artifact, after review to find orphans needing linking, before implementation to understand context
+
+commands:
+  # Overview
+  - babel list
+  # By artifact type
+  - babel list decisions
+  - babel list constraints
+  - babel list requirements
+  - babel list questions
+  - babel list purposes
+  # Modifiers (work with any type)
+  - babel list decisions --all
+  - 'babel list decisions --filter "keyword"'
+  - babel list decisions --offset 10
+  # Graph traversal
+  - babel list --from <id>
+  # Find problems
+  - babel list --orphans
+
+principles:
+  - P7 (Reasoning Travels) - Discover how reasoning connects across graph
+
+uses_context:
+  - Babel graph database (.babel/)
+  - Current artifact IDs for --from queries
+
+produces:
+  - Artifact counts by type (from babel list)
+  - Filtered artifact lists
+  - Graph connections from specific artifact
+  - Orphan artifacts needing linking
+
+composable_with:
+  - recall (discover context, then recall specific details)
+  - connect (discover orphans, then link them)
+  - maintain (discover is part of maintenance cycle)
+
+always_load: false
+load_on_demand: true
+user_invocable: true
+
+examples:
+  - |
+    ## FLOW 10: DISCOVER — Explore the Knowledge Graph
+
+    Fast, offline, token-efficient graph access without LLM.
+
+    **Key Features:**
+    - No LLM required — direct graph query
+    - Token efficient — default limit of 10
+    - Graph-aware — `--from` shows actual relationships
+    - Find orphans — artifacts that can't inform `babel why`
+    - Stateless pagination — use `--offset`, no EOF errors
+
+  - |
+    ### Discover vs Recall
+
+    | Need | Use | Why |
+    |------|-----|-----|
+    | Semantic search for reasoning | `babel why "topic"` (recall) | LLM matches meaning |
+    | Fast keyword filtering | `babel list --filter "keyword"` (discover) | Direct string match |
+    | Graph traversal | `babel list --from <id>` (discover) | Actual relationships |
+    | Find orphans | `babel list --orphans` (discover) | Graph structure query |
+
+    **Key Difference:**
+    - `babel why` uses LLM for semantic matching — slower, costs tokens
+    - `babel list` is direct graph query — no LLM, faster, cheaper
+
+  - |
+    ### Command Reference
+
+    ```bash
+    # Overview (counts by type)
+    babel list
+
+    # By artifact type (10 by default)
+    babel list decisions
+    babel list constraints
+    babel list requirements
+    babel list questions
+    babel list purposes
+
+    # Modifiers (work with any type)
+    babel list decisions --all              # All, no limit
+    babel list decisions --filter "cache"   # Keyword filter
+    babel list decisions --offset 10        # Skip first 10
+
+    # Graph traversal
+    babel list --from <id>                  # What's connected?
+
+    # Find problems
+    babel list --orphans                    # No incoming connections
+    ```
+
+  - |
+    ### Pagination Pattern (Token-Efficient)
+
+    ```bash
+    babel list decisions                    # First 10
+    babel list decisions --offset 10        # Next 10
+    babel list decisions --offset 20        # Next 10
+    ```
+
+    **Why this matters:**
+    - Stateless — no EOF errors, works for AI operators
+    - Default limit of 10 keeps token usage low
+    - Progressive disclosure — request more only if needed
+
+  - |
+    ### Use Cases
+
+    | Trigger | Command | Purpose |
+    |---------|---------|---------|
+    | Before implementing | `babel list --from <id>` | Understand context around artifact |
+    | After review | `babel list --orphans` | Find artifacts needing linking |
+    | Exploring topic | `babel list decisions --filter "cache"` | Fast keyword search |
+    | Understanding structure | `babel list` | Get overview by type |
+
+  - |
+    ### Graph Traversal with --from
+
+    ```bash
+    # Find what's connected to a specific artifact
+    babel list --from a1b2c3d4
+
+    # Output shows:
+    # - Constraints that apply
+    # - Requirements it satisfies
+    # - Specs that reference it
+    # - Other related decisions
+    ```
+
+    **This shows actual graph relationships, not semantic similarity.**
+
+  - |
+    ### Finding and Fixing Orphans
+
+    ```bash
+    # Find artifacts with no incoming connections
+    babel list --orphans
+
+    # Output example:
+    # ⚠ Orphaned artifacts (3):
+    #   [abc123] Decision: Use Redis for caching
+    #   [def456] Constraint: Max 100MB storage
+    #   [ghi789] Requirement: Offline support
+
+    # These can't inform `babel why` queries
+    # → Link them with connect skill
+    babel link abc123
+    babel link def456 <purpose_id>
+    ```
+
+  - |
+    ### AI Behavior (CRITICAL)
+
+    **WRONG:**
+    ```
+    [needs to understand caching context]
+    babel why "caching"
+    babel why "cache"
+    babel why "Redis"
+    # Multiple LLM calls, high token cost
+    ```
+
+    **RIGHT:**
+    ```
+    [needs to understand caching context]
+    babel list decisions --filter "cache"
+    # → [a1b2c3d4] Use Redis for caching...
+
+    babel list --from a1b2c3d4
+    # → Related constraints, requirements, specs
+
+    # Now you understand graph context, fast and cheap
+    # Use babel why only for deeper semantic context if needed
+    ```
+
+  - |
+    ### Example Workflow
+
+    ```bash
+    # User asks about caching
+    babel list decisions --filter "cache"   # Fast keyword search
+    # Output: [a1b2c3d4] Use Redis for caching...
+
+    babel list --from a1b2c3d4              # See what's connected
+    # Output:
+    #   → [b2c3d4e5] Constraint: Max memory 512MB
+    #   → [c3d4e5f6] Requirement: Sub-100ms response
+    #   → [d4e5f6g7] Spec: Cache implementation details
+
+    # Now you understand the graph context
+    # Not just semantic matches, but actual relationships
+    ```
+
+  - |
+    ### Discover Cycle
+
+    ```
+    list → list <type> → list --from <id> → [understand graph]
+    ```
+
+    1. **Start broad:** `babel list` (counts by type)
+    2. **Narrow by type:** `babel list decisions` (specific artifacts)
+    3. **Filter if needed:** `babel list decisions --filter "keyword"`
+    4. **Explore connections:** `babel list --from <id>`
+    5. **Find problems:** `babel list --orphans`
+
+  - |
+    ### Used In Flows
+
+    | Flow | How Discover Helps |
+    |------|-------------------|
+    | After review | `list --orphans` to find artifacts needing linking |
+    | Before implementation | `list --from <id>` to understand context |
+    | Exploring topic | `list --filter` for fast keyword search |
+    | Maintenance | `list --orphans` to find graph problems |
+
+  - |
+    ### Consequence of Skipping
+
+    | Skip | Result |
+    |------|--------|
+    | Skip `list --from` | Miss connections, lack context |
+    | Skip `list --orphans` | Orphans accumulate, `babel why` misses info |
+    | Use `babel why` for everything | High token cost, slower |
+    | Skip pagination | Token bloat on large lists |
+
+    **Rule:** Use discover for structure, recall for reasoning.
+

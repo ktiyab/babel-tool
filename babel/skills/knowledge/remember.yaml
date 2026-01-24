@@ -1,0 +1,178 @@
+name: remember
+category: knowledge
+description: Capture decisions with reasoning. Preserve WHAT was decided and WHY while fresh. Always use --batch. Follow with spec skill for implementation details.
+
+trigger: User makes decision or states constraint, user explains reasoning, explicit trigger patterns detected
+
+commands:
+  - 'babel capture "WHAT + WHY" --batch'
+  - 'babel capture "WHAT + WHY + CONSTRAINT" --batch'
+
+principles:
+  - P1 (Bootstrap from Need) - Decisions emerge from actual needs
+  - P7 (Reasoning Travels) - WHY must be captured, not just WHAT
+  - HC2 (Human Authority) - --batch queues for human review
+
+uses_context:
+  - Existing decisions on topic (via recall, before capture)
+  - User's stated reasoning
+  - Trade-offs discussed
+  - Alternatives considered and rejected
+
+produces:
+  - Queued proposal (pending review)
+  - Proposal ID for spec skill follow-up
+  - Rejected alternatives if captured
+  - Reminder to run babel review
+
+composable_with:
+  - recall (BEFORE - query existing context)
+  - spec (AFTER - add implementation details)
+  - connect (AFTER review - link to purpose)
+  - validate (user reviews batch)
+
+always_load: false
+load_on_demand: true
+user_invocable: true
+
+examples:
+  - |
+    ## FLOW 1: REMEMBER — Capture Decisions
+
+    Preserve WHAT was decided and WHY while the reasoning is fresh.
+    The --batch flag is **NON-NEGOTIABLE** (HC2 + AI-safe).
+
+  - |
+    ### Trigger Patterns
+
+    Capture when you detect these patterns:
+
+    | Pattern | Example |
+    |---------|---------|
+    | "We decided..." | "We decided to use TypeScript" |
+    | "Let's use..." | "Let's use JWT for auth" |
+    | "Because..." | "Because the team knows React" |
+    | "The reason is..." | "The reason is performance" |
+    | "We can't..." | "We can't use MongoDB here" (constraint) |
+    | "We must..." | "We must support offline mode" (requirement) |
+    | Trade-off discussion | "X is faster but Y is simpler" |
+    | Rejected alternative | "We considered X but chose Y" |
+
+  - |
+    ### Command Reference
+
+    ```bash
+    # Standard decision capture
+    babel capture "WHAT + WHY" --batch
+
+    # Decision with constraint
+    babel capture "WHAT + WHY + CONSTRAINT" --batch
+    ```
+
+  - |
+    ### Does NOT Include (See Other Skills)
+
+    | Command | Skill | When |
+    |---------|-------|------|
+    | `babel why "topic"` | /recall | BEFORE capture |
+    | `babel capture --spec <id>` | /spec | AFTER capture |
+    | `babel link <id>` | /connect | AFTER review |
+
+  - |
+    ### Complete Sequence
+
+    ```
+    1. /recall  → babel why "topic"                    # Check existing
+    2. /remember → babel capture "..." --batch         # This skill
+    3. /spec    → babel capture --spec <id> "..." --batch
+    4. /validate → user: babel review --accept <id>
+    5. /connect → babel link <id>
+    ```
+
+    **The remember → spec sequence forms the complete intent chain.**
+
+  - |
+    ### Capture Format
+
+    ```
+    [WHAT] was decided/constrained
+    [WHY] the reasoning
+    [CONSTRAINT] if any limits apply
+    ```
+
+    **Good capture:**
+    ```
+    "Using SQLite for local storage. PostgreSQL requires network
+     connectivity, but users need offline access. Constraint:
+     data must stay under 100MB per user."
+    ```
+
+    **Bad capture:**
+    ```
+    "Using SQLite"
+    ```
+
+  - |
+    ### Rejected Alternatives (Valuable!)
+
+    "Why not X" is as valuable as "why Y":
+
+    ```bash
+    babel capture "Considered PostgreSQL but chose SQLite because
+    users need offline access and data volume is small (<100MB)" --batch
+    ```
+
+    Rejected alternatives inform future decisions and prevent revisiting.
+
+  - |
+    ### AI Behavior (NON-NEGOTIABLE)
+
+    **WRONG:**
+    ```
+    "I noticed you made a decision. Should I capture it in Babel?"
+    [waits for user response]
+    [user interrupted]
+    ```
+
+    **RIGHT:**
+    ```
+    "I've queued this decision in Babel:
+
+     [DECISION] Use Redis for caching
+     WHY: API rate limits require local cache
+
+     Review pending: `babel review`"
+    [continues working]
+    ```
+
+  - |
+    ### Follow-Up Required: Spec Skill
+
+    After capturing a decision, add implementation specification:
+
+    ```bash
+    # Step 1: Capture the need (this skill)
+    babel capture "Need: Use Redis for caching because API rate limits" --batch
+    # → Returns [abc12345]
+
+    # Step 2: Add spec to the need (/spec skill)
+    babel capture --spec abc12345 "OBJECTIVE: Implement Redis cache
+    ADD: redis_client.py, cache_middleware.py
+    MODIFY: api_handler.py
+    REMOVE: None
+    PRESERVE: Existing rate limit logic
+    RELATED: api_config.py" --batch
+    ```
+
+    **Without spec capture, the implementation plan evaporates.**
+
+  - |
+    ### The --batch Flag
+
+    | Aspect | Why Required |
+    |--------|--------------|
+    | HC2 (Human Authority) | Queues for human review, not auto-confirmed |
+    | AI-Safe | Avoids interactive prompts (EOF errors) |
+    | Workflow | User validates with `babel review` |
+
+    **Never use `babel capture` without `--batch`.**

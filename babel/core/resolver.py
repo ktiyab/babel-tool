@@ -54,20 +54,31 @@ class IDResolver:
         self,
         query: str,
         artifact_type: str = None,
-        min_prefix_length: int = 4
+        min_prefix_length: int = 4,
+        codec=None
     ) -> ResolveResult:
         """
         Resolve a user-provided ID or keyword to a node.
 
         Args:
-            query: User input (ID, prefix, or keyword)
+            query: User input (ID, prefix, keyword, or short code)
             artifact_type: Optional filter by type (decision, constraint, etc.)
             min_prefix_length: Minimum chars for prefix matching
+            codec: Optional IDCodec for decoding short codes (AAA-ZZZ)
 
         Returns:
             ResolveResult with status and node/candidates
         """
         query = query.strip()
+
+        # Decode short code if codec provided and query looks like AA-BB code
+        if codec and codec.is_short_code(query):
+            # Get candidate IDs for decode resolution
+            candidates = self._get_candidates(artifact_type)
+            candidate_ids = [n.id for n in candidates]
+            decoded = codec.decode(query, candidate_ids)
+            if decoded != query:  # Successfully decoded
+                query = decoded
 
         # Strategy 1: Exact match
         node = self.graph.get_node(query)
