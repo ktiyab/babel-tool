@@ -266,9 +266,9 @@ class TestGitignoreProtection:
         """Skips when all protection patterns already present."""
         cmd, factory = init_command
 
-        # Create complete .gitignore with all patterns (env + manual)
+        # Create complete .gitignore with all patterns (env + babel config + manual)
         gitignore_path = factory.tmp_path / ".gitignore"
-        gitignore_path.write_text(".env\n.env.local\n.env*.local\n.babel/manual/\n")
+        gitignore_path.write_text(".env\n.env.local\n.env*.local\n.babel/.env\n.babel/manual/\n")
 
         patterns_added, message = cmd._ensure_gitignore_protection()
 
