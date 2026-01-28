@@ -522,6 +522,6 @@ Local captures (`.babel/local/`) never leave your machine. Shared captures go wh
 
 ## Documentation
 
-[Manual](./manual/): Command reference for AI operators. The manual is structured for machine reading, with sections like [CMD-05] AI Operator Guide designed for your coding assistant to consult when executing commands.
+[Manual](https://github.com/ktiyab/babel-tool/tree/main/babel/manual): Command reference for AI operators. The manual is structured for machine reading, with sections like [CMD-05] AI Operator Guide designed for your coding assistant to consult when executing commands.
 
-[System Prompt](./manual/babel_system_prompt.md): The encoded best practices that teach your AI when and how to use Babel commands.
+[System Prompt](https://github.com/ktiyab/babel-tool/blob/main/babel/manual/babel_system_prompt.md): The encoded best practices that teach your AI when and how to use Babel commands.
