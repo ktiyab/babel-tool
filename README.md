@@ -26,7 +26,6 @@ export ANTHROPIC_API_KEY="sk-ant-..."   # Cloud: Claude (recommended)
 
 ```bash
 babel prompt --install              # Once: teach your AI about Babel
-babel skill export                  # Once: install AI skills (auto-detects platform)
 babel init "Detailed information about your project purpose" \
  --need "Detailed information on the need/friction that led to the project" # Once: initialize your project
 babel review                        # Periodically: validate AI proposals

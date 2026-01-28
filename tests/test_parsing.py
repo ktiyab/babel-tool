@@ -21,6 +21,7 @@ from pathlib import Path
 
 # Check if tree-sitter-language-pack is available
 try:
+    import tree_sitter_language_pack  # noqa: F401
     TREE_SITTER_AVAILABLE = True
 except ImportError:
     TREE_SITTER_AVAILABLE = False
