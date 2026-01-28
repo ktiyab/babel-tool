@@ -27,6 +27,7 @@ DEFAULT_BIN_DIR="$HOME/.local/bin"
 INSTALL_DIR=""
 BIN_DIR=""
 SKIP_CONFIRM=false
+PLATFORM=""
 
 # Colors for output
 RED='\033[0;31m'
@@ -34,6 +35,23 @@ GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m' # No Color
+
+# Platform detection
+detect_platform() {
+    case "$(uname -s)" in
+        CYGWIN*|MINGW*|MSYS*|Windows_NT)
+            echo "windows"
+            ;;
+        Darwin*)
+            echo "macos"
+            ;;
+        *)
+            echo "linux"
+            ;;
+    esac
+}
+
+PLATFORM=$(detect_platform)
 
 # -----------------------------------------------------------------------------
 # Helper functions
@@ -129,7 +147,12 @@ confirm_uninstall() {
     echo ""
     echo "This will remove:"
     echo "  - $INSTALL_DIR/"
-    [ -L "$BIN_DIR/babel" ] && echo "  - $BIN_DIR/babel (symlink)"
+    # Check for both symlink and regular file (wrapper script on Windows)
+    if [ -L "$BIN_DIR/babel" ]; then
+        echo "  - $BIN_DIR/babel (symlink)"
+    elif [ -f "$BIN_DIR/babel" ]; then
+        echo "  - $BIN_DIR/babel (wrapper script)"
+    fi
     echo ""
     echo "Your project .babel/ directories will NOT be affected."
     echo ""
@@ -143,15 +166,26 @@ confirm_uninstall() {
 }
 
 remove_symlink() {
-    log_info "Removing symlink..."
+    log_info "Removing babel command..."
 
     if [ -L "$BIN_DIR/babel" ]; then
+        # It's a symlink (Linux/macOS, or Windows with symlink support)
         rm "$BIN_DIR/babel"
-        log_success "Removed: $BIN_DIR/babel"
+        log_success "Removed symlink: $BIN_DIR/babel"
     elif [ -f "$BIN_DIR/babel" ]; then
-        log_warn "$BIN_DIR/babel exists but is not a symlink (skipped)"
+        # It's a regular file (wrapper script on Windows)
+        if [ "$PLATFORM" = "windows" ]; then
+            # On Windows, this is expected (wrapper script fallback)
+            rm "$BIN_DIR/babel"
+            log_success "Removed wrapper script: $BIN_DIR/babel"
+        else
+            # On Linux/macOS, a regular file is unexpected
+            log_warn "$BIN_DIR/babel is not a symlink - removing anyway"
+            rm "$BIN_DIR/babel"
+            log_success "Removed: $BIN_DIR/babel"
+        fi
     else
-        log_warn "Symlink not found: $BIN_DIR/babel"
+        log_warn "babel command not found: $BIN_DIR/babel"
     fi
 }
 
@@ -163,6 +197,78 @@ remove_installation() {
         log_success "Removed: $INSTALL_DIR/"
     else
         log_warn "Installation directory not found: $INSTALL_DIR/"
+    fi
+}
+
+get_shell_profile() {
+    # Detect the appropriate shell profile file (same logic as install.sh)
+    local shell_name
+    shell_name=$(basename "${SHELL:-/bin/bash}")
+
+    case "$PLATFORM" in
+        windows)
+            if [ -f "$HOME/.bash_profile" ]; then
+                echo "$HOME/.bash_profile"
+            else
+                echo "$HOME/.bashrc"
+            fi
+            ;;
+        macos)
+            case "$shell_name" in
+                zsh)  echo "$HOME/.zshrc" ;;
+                bash)
+                    if [ -f "$HOME/.bash_profile" ]; then
+                        echo "$HOME/.bash_profile"
+                    else
+                        echo "$HOME/.profile"
+                    fi
+                    ;;
+                fish) echo "$HOME/.config/fish/config.fish" ;;
+                *)    echo "$HOME/.profile" ;;
+            esac
+            ;;
+        linux)
+            case "$shell_name" in
+                zsh)  echo "$HOME/.zshrc" ;;
+                bash) echo "$HOME/.bashrc" ;;
+                fish) echo "$HOME/.config/fish/config.fish" ;;
+                *)    echo "$HOME/.profile" ;;
+            esac
+            ;;
+        *)
+            echo "$HOME/.profile"
+            ;;
+    esac
+}
+
+cleanup_path_config() {
+    log_info "Checking PATH configuration..."
+
+    local profile_file
+    profile_file=$(get_shell_profile)
+
+    if [ ! -f "$profile_file" ]; then
+        return 0
+    fi
+
+    # Check if our marker exists in the file
+    if grep -q "babel-tool installer" "$profile_file" 2>/dev/null; then
+        # Create a temp file and remove our lines
+        local temp_file
+        temp_file=$(mktemp)
+
+        # Remove the marker line and the PATH line that follows
+        # Also remove the blank line before the marker
+        sed '/^$/N;/\n# Added by babel-tool installer/d' "$profile_file" | \
+        grep -v "# Added by babel-tool installer" | \
+        grep -v "export PATH=\"$BIN_DIR:" > "$temp_file"
+
+        # Replace original with cleaned version
+        mv "$temp_file" "$profile_file"
+
+        log_success "Removed PATH configuration from $profile_file"
+    else
+        log_info "No PATH configuration found in $profile_file"
     fi
 }
 
@@ -178,9 +284,11 @@ main() {
     echo "  Babel Tool Uninstaller"
     echo "=========================================="
     echo ""
+    echo "  Platform: $PLATFORM"
+    echo ""
 
-    # Check if anything is installed
-    if [ ! -d "$INSTALL_DIR" ] && [ ! -L "$BIN_DIR/babel" ]; then
+    # Check if anything is installed (symlink OR file for Windows wrapper script)
+    if [ ! -d "$INSTALL_DIR" ] && [ ! -L "$BIN_DIR/babel" ] && [ ! -f "$BIN_DIR/babel" ]; then
         log_warn "No installation found"
         echo ""
         echo "  Expected locations:"
@@ -193,6 +301,7 @@ main() {
     confirm_uninstall
     remove_symlink
     remove_installation
+    cleanup_path_config
 
     echo ""
     echo "=========================================="

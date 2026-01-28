@@ -8,32 +8,85 @@
 
 ---
 
-## Quick Install
+## Quick Install (Claude Code)
+
+This guide is for **Claude Code** users. For other AI assistants, see [Other AI Assistants](#other-ai-assistants) below.
+
+### Step 1: Install Babel Tool
 
 ```bash
-# Install
 git clone https://github.com/ktiyab/babel-tool.git
 cd babel-tool && ./install.sh
-
-# Configure LLM (choose one)
-export ANTHROPIC_API_KEY="sk-ant-..."   # Cloud: Claude (recommended)
-# OR use local LLM: export BABEL_LLM_PROVIDER=ollama
 ```
 
-> **Security:** `babel init` automatically adds `.env` to `.gitignore` to prevent credential leakage.
+The installer configures your PATH automatically. Restart your terminal or run `source ~/.bashrc` (or `~/.zshrc`).
 
-**Then, only 4 commands to start:**
+### Step 2: Set Up Your Project
 
 ```bash
-babel prompt --install              # Once: teach your AI about Babel
-babel init "Detailed information about your project purpose" \
- --need "Detailed information on the need/friction that led to the project" # Once: initialize your project
-babel review                        # Periodically: validate AI proposals
+# Navigate to your project folder
+cd /path/to/your/project
+
+# Initialize Claude Code in your project (creates CLAUDE.md)
+claude
+
+# Install Babel instructions (overwrites CLAUDE.md)
+babel prompt --install --force
 ```
 
-That's it. Your AI assistant handles the 35+ commands; you just review.
+### Step 3: Bootstrap with Claude
 
-> **Other AIs?** `babel prompt --install` and `babel skill export` auto-configure Claude Code and Cursor. For others, use `babel prompt > /path/to/ai/instructions.md` and `babel skill export --target generic` to export to a monolithic reference file.
+Now start Claude Code. It has Babel instructions loaded. Tell Claude about your project:
+
+```
+You: "Initialize this project. Purpose: [describe what you're building].
+     Need: [describe the problem/friction that led to this project]"
+```
+
+Claude will:
+1. Run `babel init "..." --need "..."` to initialize the project
+2. Create `.babel/.env` with `BABEL_PROJECT_PATH` set to your project
+3. Set up `.gitignore` to protect credentials
+
+### Step 4: Verify Configuration
+
+Check that `.babel/.env` was created with your project path:
+
+```bash
+cat .babel/.env
+# Should contain: export BABEL_PROJECT_PATH=/path/to/your/project
+```
+
+If missing, ask Claude: *"The BABEL_PROJECT_PATH wasn't set. Please add it to .babel/.env"*
+
+### Step 5: (Optional) Enable AI Summarization
+
+For semantic extraction and summarization, add your API key to `.babel/.env`:
+
+```bash
+echo 'export ANTHROPIC_API_KEY="sk-ant-..."' >> .babel/.env
+```
+
+Or use a local LLM: `echo 'export BABEL_LLM_PROVIDER=ollama' >> .babel/.env`
+
+> **Security:** `.babel/.env` is automatically added to `.gitignore` to prevent credential leakage.
+
+---
+
+### Other AI Assistants
+
+For Cursor, Cody, or other AI assistants:
+
+```bash
+babel prompt --install              # Auto-detects IDE and installs prompt
+babel skill export                  # Exports command reference
+```
+
+For generic setup:
+```bash
+babel prompt > /path/to/ai/instructions.md
+babel skill export --target generic
+```
 
 **Requirements:** Python 3.10+ • **LLM options:** [Cloud API](#setting-up-api-keys) or [Local Ollama](#local-llm-ollama) • **Full config:** [LLM Configuration](#llm-configuration)
 

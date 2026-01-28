@@ -74,6 +74,9 @@ class InitCommand(BaseCommand):
         # Auto-detect CPU cores and configure parallelization
         parallel_config, parallel_message = self._configure_parallelization()
 
+        # Create project-local .babel/.env with BABEL_PROJECT_PATH
+        project_env_created, project_env_message = self._create_project_env()
+
         # Build output with OutputTemplate
         template = OutputTemplate(symbols=symbols)
         template.header("BABEL INIT", "Project Initialized (P1)")
@@ -84,6 +87,9 @@ class InitCommand(BaseCommand):
         # PROJECT section
         project_line = f"{symbols.shared} {self.project_dir}"
         template.section("PROJECT", project_line)
+
+        # CONFIG section
+        template.section("CONFIG", project_env_message)
 
         # PURPOSE section (with optional need grounding)
         if need:
@@ -132,13 +138,17 @@ class InitCommand(BaseCommand):
 
     def _install_system_prompt(self):
         """Copy system prompt template to project root."""
-        # Find template in package
-        template_path = Path(__file__).parent.parent / "templates" / "system_prompt.md"
+        # Find template in package (babel/prompts/system_prompt.md)
+        template_path = Path(__file__).parent.parent / "prompts" / "system_prompt.md"
         target_path = self.project_dir / ".system_prompt.md"
 
-        if template_path.exists() and not target_path.exists():
+        if target_path.exists():
+            # Already exists, don't overwrite
+            return
+
+        if template_path.exists():
             shutil.copy(template_path, target_path)
-        elif not template_path.exists():
+        else:
             # Fallback: create minimal prompt if template missing
             self._create_minimal_system_prompt(target_path)
 
@@ -146,7 +156,7 @@ class InitCommand(BaseCommand):
         """Create minimal system prompt if template not found."""
         if path.exists():
             return
-        path.write_text(MINIMAL_SYSTEM_PROMPT)
+        path.write_text(MINIMAL_SYSTEM_PROMPT, encoding="utf-8")
 
     def _install_manual(self) -> tuple:
         """
@@ -199,19 +209,22 @@ class InitCommand(BaseCommand):
 
         # Patterns to protect (NOT .env.example - that's a template)
         # .babel/manual/ is regenerable from package, no need to track
-        env_patterns = [".env", ".env.local", ".env*.local", ".babel/manual/"]
+        # .babel/.env contains local paths (BABEL_PROJECT_PATH)
+        env_patterns = [".env", ".env.local", ".env*.local", ".babel/.env", ".babel/manual/"]
 
         # If no .gitignore exists, create one with protection patterns
         if not gitignore_path.exists():
             content = "# Environment files (contain secrets - never commit)\n"
             content += ".env\n.env.local\n.env*.local\n\n"
+            content += "# Babel local config (contains machine-specific paths)\n"
+            content += ".babel/.env\n\n"
             content += "# Babel manual (regenerable from package)\n"
             content += ".babel/manual/\n"
-            gitignore_path.write_text(content)
+            gitignore_path.write_text(content, encoding="utf-8")
             return env_patterns, "Created .gitignore with credential and manual protection"
 
         # Read existing .gitignore
-        existing_content = gitignore_path.read_text()
+        existing_content = gitignore_path.read_text(encoding="utf-8")
         existing_lines = set(line.strip() for line in existing_content.splitlines())
 
         # Find patterns not yet excluded
@@ -264,7 +277,7 @@ class InitCommand(BaseCommand):
         existing_content = ""
         existing_keys = set()
         if env_path.exists():
-            existing_content = env_path.read_text()
+            existing_content = env_path.read_text(encoding="utf-8")
             for line in existing_content.splitlines():
                 line = line.strip()
                 if line and not line.startswith("#") and "=" in line:
@@ -294,6 +307,51 @@ class InitCommand(BaseCommand):
         message = f"Detected {cpu_count} cores → CPU_WORKERS={cpu_workers}, IO_WORKERS={io_workers}"
         return missing_keys, message
 
+    def _create_project_env(self) -> tuple:
+        """
+        Create .babel/.env file with project-specific configuration.
+
+        Sets BABEL_PROJECT_PATH to ensure commands always target this project
+        regardless of current working directory.
+
+        Returns:
+            Tuple of (created: bool, message: str)
+        """
+        babel_dir = self.project_dir / ".babel"
+        env_path = babel_dir / ".env"
+
+        # Ensure .babel directory exists
+        babel_dir.mkdir(parents=True, exist_ok=True)
+
+        # Get absolute path for the project
+        project_path = str(self.project_dir.resolve())
+
+        # Check if already configured
+        if env_path.exists():
+            existing_content = env_path.read_text(encoding="utf-8")
+            if "BABEL_PROJECT_PATH" in existing_content:
+                return False, f"Project config exists: {env_path}"
+
+        # Create or append to .babel/.env
+        content = ""
+        if env_path.exists():
+            content = env_path.read_text(encoding="utf-8")
+            if content and not content.endswith("\n"):
+                content += "\n"
+
+        content += "# -----------------------------------------------------------------------------\n"
+        content += "# Babel Project Configuration\n"
+        content += "# Generated by: babel init\n"
+        content += "# -----------------------------------------------------------------------------\n"
+        content += "\n"
+        content += "# Project root path - ensures babel commands target this project\n"
+        content += "# regardless of current working directory\n"
+        content += f"export BABEL_PROJECT_PATH={project_path}\n"
+
+        env_path.write_text(content, encoding="utf-8")
+
+        return True, f"Project config: {env_path}"
+
     def _install_llm_prompt(self):
         """
         Auto-detect IDE and install LLM-specific prompt.
@@ -314,7 +372,8 @@ class InitCommand(BaseCommand):
         ide_name, prompt_path = get_ide_info(ide_type)
 
         # Read system_prompt.md (single source of truth)
-        system_prompt_path = Path(__file__).parent.parent / "system_prompt.md"
+        # Primary: babel/prompts/system_prompt.md
+        system_prompt_path = Path(__file__).parent.parent / "prompts" / "system_prompt.md"
         if system_prompt_path.exists():
             prompt_content = system_prompt_path.read_text(encoding='utf-8')
         else:
@@ -344,7 +403,7 @@ class InitCommand(BaseCommand):
             self._install_system_prompt()
 
         if prompt_path.exists():
-            print(prompt_path.read_text())
+            print(prompt_path.read_text(encoding="utf-8"))
         else:
             print("System prompt not found. Run: babel init \"purpose\"")
 

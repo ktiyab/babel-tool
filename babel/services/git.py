@@ -386,7 +386,7 @@ class GitIntegration:
 
         # Check for existing hook
         if hook_path.exists():
-            content = hook_path.read_text()
+            content = hook_path.read_text(encoding="utf-8")
             if "babel capture-commit" in content:
                 return True, "Hook already installed"
             else:
@@ -397,7 +397,7 @@ class GitIntegration:
                 return True, "Hook added to existing post-commit"
 
         # Create new hook
-        hook_path.write_text(POST_COMMIT_HOOK)
+        hook_path.write_text(POST_COMMIT_HOOK, encoding="utf-8")
 
         # Make executable
         os.chmod(hook_path, 0o755)
@@ -419,7 +419,7 @@ class GitIntegration:
         if not hook_path.exists():
             return True, "No hook to remove"
 
-        content = hook_path.read_text()
+        content = hook_path.read_text(encoding="utf-8")
 
         if "babel capture-commit" not in content:
             return True, "Hook not installed by babel"
@@ -436,7 +436,7 @@ class GitIntegration:
                 line for line in lines
                 if "babel capture-commit" not in line and "Added by babel" not in line
             ]
-            hook_path.write_text("\n".join(new_lines))
+            hook_path.write_text("\n".join(new_lines), encoding="utf-8")
             return True, "Babel hook removed (other hooks preserved)"
 
     def hooks_status(self) -> str:
@@ -449,7 +449,7 @@ class GitIntegration:
         if not hook_path.exists():
             return "Not installed"
 
-        content = hook_path.read_text()
+        content = hook_path.read_text(encoding="utf-8")
 
         if "babel capture-commit" in content:
             return "Installed"
