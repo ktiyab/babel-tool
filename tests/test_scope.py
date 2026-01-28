@@ -5,9 +5,8 @@ Tests shared/local event management and synchronization.
 """
 
 import pytest
-from pathlib import Path
 
-from babel.core.events import Event, EventType, DualEventStore, capture_conversation, declare_purpose, confirm_artifact
+from babel.core.events import Event, EventType, DualEventStore, capture_conversation, declare_purpose
 from babel.core.scope import EventScope, get_default_scope, scope_display_marker, scope_from_string
 
 

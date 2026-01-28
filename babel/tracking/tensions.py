@@ -22,15 +22,14 @@ Tensions integrate with:
 
 from dataclasses import dataclass, field
 from typing import Optional, List, Dict, Any
-from datetime import datetime, timezone
-from pathlib import Path
 
 from ..core.events import (
     DualEventStore, Event, EventType,
     raise_challenge, add_evidence, resolve_challenge
 )
 from ..core.scope import EventScope
-from ..presentation.symbols import get_symbols, truncate, SUMMARY_LENGTH
+from ..presentation.formatters import generate_summary, format_timestamp
+from ..presentation.symbols import get_symbols
 
 
 @dataclass
@@ -345,26 +344,27 @@ def format_challenge(challenge: Challenge, verbose: bool = False, full: bool = F
 
     lines.append(f"{status_icon} Challenge [{challenge.id[:8]}]{domain_tag}")
     lines.append(f"  Against: {challenge.parent_type} [{challenge.parent_id[:8]}]")
-    lines.append(f"  Reason: {truncate(challenge.reason, SUMMARY_LENGTH, full)}")
+    lines.append(f"  Reason: {generate_summary(challenge.reason, full=full)}")
 
     if challenge.hypothesis:
-        lines.append(f"  Hypothesis: {truncate(challenge.hypothesis, SUMMARY_LENGTH, full)}")
+        lines.append(f"  Hypothesis: {generate_summary(challenge.hypothesis, full=full)}")
 
     if challenge.test:
-        lines.append(f"  Test: {truncate(challenge.test, SUMMARY_LENGTH, full)}")
+        lines.append(f"  Test: {generate_summary(challenge.test, full=full)}")
 
-    lines.append(f"  By: {challenge.author} | {challenge.created_at[:10]}")
+    # P12: Time always shown
+    lines.append(f"  By: {challenge.author} | {format_timestamp(challenge.created_at)}")
 
     if verbose and challenge.evidence:
         lines.append(f"  Evidence ({len(challenge.evidence)}):")
         for e in challenge.evidence[-3:]:  # Show last 3
-            content = truncate(e['content'], SUMMARY_LENGTH, full)
+            content = generate_summary(e['content'], full=full)
             lines.append(f"    • {content}")
 
     if challenge.resolution:
         r = challenge.resolution
         lines.append(f"  Resolution: {r['outcome']}")
-        lines.append(f"    {truncate(r['resolution'], SUMMARY_LENGTH, full)}")
+        lines.append(f"    {generate_summary(r['resolution'], full=full)}")
 
     return "\n".join(lines)
 
@@ -395,7 +395,7 @@ def format_tensions_summary(tracker: TensionTracker, full: bool = False) -> str:
                 status = "untested" if not challenge.evidence else f"{len(challenge.evidence)} evidence"
                 hypothesis_note = f" ({status})"
 
-            reason = truncate(challenge.reason, SUMMARY_LENGTH, full)
+            reason = generate_summary(challenge.reason, full=full)
             lines.append(f"  {symbols.bullet} [{challenge.id[:8]}] {reason}{hypothesis_note}")
 
         if len(open_challenges) > 10:
@@ -419,7 +419,8 @@ def format_challenge_in_context(challenge: Challenge) -> str:
 
     lines.append(f"{symbols.tree_branch} {status_icon} CHALLENGE [{challenge.id[:8]}]")
     lines.append(f"|  \"{challenge.reason}\"")
-    lines.append(f"|  By: {challenge.author} | {challenge.created_at[:10]}")
+    # P12: Time always shown
+    lines.append(f"|  By: {challenge.author} | {format_timestamp(challenge.created_at)}")
 
     if challenge.hypothesis:
         evidence_status = "untested" if not challenge.evidence else f"{len(challenge.evidence)} evidence"

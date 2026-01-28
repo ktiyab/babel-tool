@@ -18,7 +18,7 @@ import json
 from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path
-from typing import List, Dict, Tuple, Optional, Any
+from typing import List, Dict, Tuple, Any
 from dataclasses import dataclass, field
 
 from ..skills import (
@@ -27,7 +27,6 @@ from ..skills import (
     SkillCategory,
     load_all_skills,
     load_protocols,
-    get_always_load_skills,
     get_skills_dir,
 )
 from ..config import update_env_file

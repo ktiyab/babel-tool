@@ -12,7 +12,6 @@ No real LLM calls — tests work without API keys or packages.
 
 import pytest
 import json
-from pathlib import Path
 
 from babel.services.extractor import Extractor, Proposal, ExtractionQueue
 from babel.services.providers import MockProvider
@@ -198,6 +197,57 @@ class TestExtractionQueue:
         
         assert proposals == []  # Nothing extracted
         assert extractor.queue.count() == 1  # But queued for later
+
+    def test_process_queue_clears_even_when_no_proposals(self, tmp_path):
+        """Queue clears after successful processing even if no artifacts extracted.
+
+        Bug fix: Previously queue only cleared if proposals were found,
+        causing infinite reprocessing of items that yield no artifacts.
+        """
+        queue_path = tmp_path / "queue.jsonl"
+
+        # Create a mock provider that returns empty artifacts
+        class EmptyProvider(MockProvider):
+            def complete(self, system, user, max_tokens=None):
+                from babel.services.providers import LLMResponse
+                return LLMResponse(
+                    text='{"artifacts": [], "meta": {"extractable": false}}',
+                    input_tokens=10,
+                    output_tokens=10
+                )
+
+        extractor = Extractor(provider=EmptyProvider(), queue_path=queue_path)
+
+        # Add item to queue
+        extractor.queue.add("Some text with no extractable content", "src_1")
+        assert extractor.queue.count() == 1
+
+        # Process queue - should return empty but still clear
+        proposals = extractor.process_queue()
+
+        assert proposals == []  # No proposals extracted
+        assert extractor.queue.count() == 0  # Queue should be cleared anyway
+
+    def test_process_queue_keeps_failed_items(self, tmp_path):
+        """Failed items stay in queue for retry."""
+        queue_path = tmp_path / "queue.jsonl"
+
+        # Create a provider that raises an exception
+        class FailingProvider(MockProvider):
+            def complete(self, system, user, max_tokens=None):
+                raise Exception("LLM unavailable")
+
+        extractor = Extractor(provider=FailingProvider(), queue_path=queue_path)
+
+        # Add item to queue
+        extractor.queue.add("Text that will fail to process", "src_1")
+        assert extractor.queue.count() == 1
+
+        # Process queue - should fail but keep item
+        proposals = extractor.process_queue()
+
+        assert proposals == []  # No proposals due to failure
+        assert extractor.queue.count() == 1  # Item should remain for retry
 
 
 # ============================================================================

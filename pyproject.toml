@@ -7,7 +7,7 @@ name = "babel-tool"
 dynamic = ["version"]
 description = "Babel — Reasoning programing."
 readme = "README.md"
-requires-python = ">=3.9"
+requires-python = ">=3.10"
 license = {text = "MIT"}
 authors = [
     {name = "ktiyab"}
@@ -18,7 +18,6 @@ classifiers = [
     "Intended Audience :: Developers",
     "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.9",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
@@ -30,12 +29,17 @@ dependencies = [
     "orjson>=3.9.0",       # 10x faster JSON parsing for event loading
     "rapidfuzz>=3.0.0",    # 10-100x faster string matching for similarity
     "xxhash>=3.0.0",       # 5x faster hashing for task IDs and cache keys
+    # Semantic digest generation (lightweight, no ML models)
+    "yake>=0.4.8",         # Fast keyword extraction for meaningful summaries
 ]
 
 [project.optional-dependencies]
 dev = [
     "pytest>=7.0",
     "pytest-cov>=4.0",
+]
+clean = [
+    "ruff>=0.1.0",  # Fast Python linter for code cleanup (unused imports, etc.)
 ]
 claude = [
     "anthropic>=0.18.0",
@@ -49,8 +53,13 @@ gemini = [
 dotenv = [
     "python-dotenv>=1.0.0",
 ]
+parsing = [
+    # Multi-language symbol extraction via tree-sitter AST parsing
+    # Note: Requires Python 3.10+ (package constraint)
+    "tree-sitter-language-pack>=0.7.0",  # 165+ languages, permissive licenses
+]
 all = [
-    "babel-tool[claude,openai,gemini,dotenv]",
+    "babel-tool[claude,openai,gemini,dotenv,clean,parsing]",
 ]
 
 [project.scripts]
@@ -65,7 +74,7 @@ where = ["."]
 include = ["babel*"]
 
 [tool.setuptools.package-data]
-babel = ["templates/*.md"]
+babel = ["templates/*.md", "manual/*.md"]
 
 [tool.setuptools.dynamic]
 version = {attr = "babel.__version__"}

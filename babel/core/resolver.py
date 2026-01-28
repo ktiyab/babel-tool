@@ -13,6 +13,8 @@ from dataclasses import dataclass
 from typing import Optional, List, TYPE_CHECKING
 from enum import Enum
 
+from ..presentation.formatters import get_node_summary, generate_summary
+
 if TYPE_CHECKING:
     from .core.graph import GraphStore, Node
 
@@ -164,7 +166,7 @@ class IDResolver:
         matches = []
 
         for node in candidates:
-            summary = node.content.get('summary', '')
+            summary = get_node_summary(node)
             if keyword_lower in summary.lower():
                 matches.append(node)
 
@@ -179,13 +181,13 @@ def format_resolve_prompt(result: ResolveResult, artifact_type: str = "artifact"
     """
     if result.status == ResolveStatus.FOUND:
         node = result.node
-        summary = node.content.get('summary', str(node.content)[:50])
+        summary = get_node_summary(node) or generate_summary(str(node.content))
         return f"Found: {node.type} [{node.id[:8]}]\n  \"{summary}\""
 
     elif result.status == ResolveStatus.AMBIGUOUS:
         lines = [f"Multiple matches for \"{result.query}\":\n"]
         for i, node in enumerate(result.candidates, 1):
-            summary = node.content.get('summary', '')[:40]
+            summary = generate_summary(get_node_summary(node))
             lines.append(f"  {i}. [{node.id[:8]}] {summary}")
         lines.append(f"\nWhich one? Enter number or ID prefix:")
         return "\n".join(lines)
@@ -195,7 +197,7 @@ def format_resolve_prompt(result: ResolveResult, artifact_type: str = "artifact"
         if result.candidates:
             lines.append(f"Recent {artifact_type}s:")
             for node in result.candidates:
-                summary = node.content.get('summary', '')[:40]
+                summary = generate_summary(get_node_summary(node))
                 lines.append(f"  [{node.id[:8]}] {summary}")
         lines.append(f"\nTry: babel <command> <id> ...")
         return "\n".join(lines)
@@ -236,7 +238,7 @@ def resolve_with_prompt(
                 idx = int(choice) - 1
                 if 0 <= idx < len(result.candidates):
                     node = result.candidates[idx]
-                    summary = node.content.get('summary', '')[:50]
+                    summary = generate_summary(get_node_summary(node))
                     print(f"\nFound: {node.type} [{node.id[:8]}]")
                     print(f"  \"{summary}\"")
                     return node
@@ -244,7 +246,7 @@ def resolve_with_prompt(
             # Try as ID prefix
             for node in result.candidates:
                 if node.id.startswith(choice):
-                    summary = node.content.get('summary', '')[:50]
+                    summary = generate_summary(get_node_summary(node))
                     print(f"\nFound: {node.type} [{node.id[:8]}]")
                     print(f"  \"{summary}\"")
                     return node

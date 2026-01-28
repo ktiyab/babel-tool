@@ -6,14 +6,12 @@ Context-aware technical advisor using Babel's knowledge.
 
 import pytest
 import json
-from pathlib import Path
-from datetime import datetime, timezone
 
 from babel.services.scanner import (
     Scanner, ScanResult, ScanFinding, ScanContext,
     format_scan_result
 )
-from babel.core.events import Event, EventType, DualEventStore
+from babel.core.events import DualEventStore
 from babel.core.graph import GraphStore
 from babel.services.providers import MockProvider
 from babel.core.loader import LazyLoader
@@ -592,3 +590,1168 @@ class TestScannerIntegration:
         assert health.scan_type == "health"
         assert arch.scan_type == "architecture"
         assert security.scan_type == "security"
+
+
+# =============================================================================
+# Clean Scan Verification Tests (Hybrid Parser)
+# =============================================================================
+
+from babel.services.scanner import VERIFIED_TRUE, VERIFIED_FALSE, UNCERTAIN
+from unittest.mock import patch, Mock
+
+
+@pytest.fixture
+def temp_python_file(tmp_path):
+    """Create a temporary Python file for testing."""
+    def _create(content: str, name: str = "test_module.py"):
+        file_path = tmp_path / name
+        file_path.write_text(content, encoding='utf-8')
+        return file_path
+    return _create
+
+
+class TestIsInitReexport:
+    """Test _is_init_reexport pattern detection."""
+
+    def test_detects_init_reexport(self, setup_scanner):
+        """Detects top-level import in __init__.py as re-export."""
+        scanner, _, _ = setup_scanner
+
+        lines = [
+            "from .module import SomeClass",
+            "",
+            "def some_function():",
+            "    pass"
+        ]
+
+        result = scanner._is_init_reexport("pkg/__init__.py", 1, lines)
+
+        assert result is True
+
+    def test_ignores_non_init_files(self, setup_scanner):
+        """Does not flag imports in non-__init__.py files."""
+        scanner, _, _ = setup_scanner
+
+        lines = ["from typing import List"]
+
+        result = scanner._is_init_reexport("pkg/module.py", 1, lines)
+
+        assert result is False
+
+    def test_ignores_indented_imports(self, setup_scanner):
+        """Does not flag indented imports (inside functions)."""
+        scanner, _, _ = setup_scanner
+
+        lines = [
+            "def foo():",
+            "    from typing import List",
+            "    return []"
+        ]
+
+        result = scanner._is_init_reexport("pkg/__init__.py", 2, lines)
+
+        assert result is False
+
+    def test_handles_invalid_line_number(self, setup_scanner):
+        """Handles out-of-bounds line numbers gracefully."""
+        scanner, _, _ = setup_scanner
+
+        lines = ["import os"]
+
+        assert scanner._is_init_reexport("__init__.py", 0, lines) is False
+        assert scanner._is_init_reexport("__init__.py", 999, lines) is False
+
+
+class TestIsInAllList:
+    """Test _is_in_all_list pattern detection."""
+
+    def test_detects_symbol_in_all(self, setup_scanner):
+        """Detects symbol listed in __all__."""
+        scanner, _, _ = setup_scanner
+
+        content = '__all__ = ["foo", "bar", "baz"]'
+
+        assert scanner._is_in_all_list(content, "foo") is True
+        assert scanner._is_in_all_list(content, "bar") is True
+        assert scanner._is_in_all_list(content, "baz") is True
+
+    def test_ignores_unlisted_symbol(self, setup_scanner):
+        """Returns False for symbols not in __all__."""
+        scanner, _, _ = setup_scanner
+
+        content = '__all__ = ["foo", "bar"]'
+
+        assert scanner._is_in_all_list(content, "baz") is False
+
+    def test_handles_single_quotes(self, setup_scanner):
+        """Handles single-quoted strings in __all__."""
+        scanner, _, _ = setup_scanner
+
+        content = "__all__ = ['foo', 'bar']"
+
+        assert scanner._is_in_all_list(content, "foo") is True
+
+    def test_handles_multiline_all(self, setup_scanner):
+        """Handles multiline __all__ definitions."""
+        scanner, _, _ = setup_scanner
+
+        content = '''
+__all__ = [
+    "foo",
+    "bar",
+    "baz",
+]
+'''
+        assert scanner._is_in_all_list(content, "bar") is True
+
+    def test_handles_plus_equals(self, setup_scanner):
+        """Handles __all__ += [...] syntax."""
+        scanner, _, _ = setup_scanner
+
+        content = '__all__ += ["extra"]'
+
+        assert scanner._is_in_all_list(content, "extra") is True
+
+
+class TestRegexSearchAfterImport:
+    """Test _regex_search_after_import fast-path."""
+
+    def test_finds_usage_after_import(self, setup_scanner):
+        """Finds symbol usage after import line."""
+        scanner, _, _ = setup_scanner
+
+        lines = [
+            "import json",
+            "",
+            "def process():",
+            "    data = json.loads(text)",
+            "    return data"
+        ]
+
+        result = scanner._regex_search_after_import(lines, "json", 1)
+
+        assert result is True
+
+    def test_no_usage_after_import(self, setup_scanner):
+        """Returns False when symbol not used after import."""
+        scanner, _, _ = setup_scanner
+
+        lines = [
+            "import json",
+            "",
+            "def process():",
+            "    return {}"
+        ]
+
+        result = scanner._regex_search_after_import(lines, "json", 1)
+
+        assert result is False
+
+    def test_skips_comments(self, setup_scanner):
+        """Does not count symbol in comments as usage."""
+        scanner, _, _ = setup_scanner
+
+        lines = [
+            "import json",
+            "# json is not used here",
+            "def process():",
+            "    return {}"
+        ]
+
+        result = scanner._regex_search_after_import(lines, "json", 1)
+
+        assert result is False
+
+    def test_word_boundary_matching(self, setup_scanner):
+        """Only matches whole word, not substrings."""
+        scanner, _, _ = setup_scanner
+
+        lines = [
+            "from typing import List",
+            "",
+            "def process():",
+            "    return 'Listing'"  # Contains 'List' as substring
+        ]
+
+        result = scanner._regex_search_after_import(lines, "List", 1)
+
+        assert result is False
+
+    def test_handles_invalid_line_number(self, setup_scanner):
+        """Handles invalid line numbers gracefully."""
+        scanner, _, _ = setup_scanner
+
+        lines = ["import json"]
+
+        assert scanner._regex_search_after_import(lines, "json", 0) is False
+        assert scanner._regex_search_after_import(lines, "json", 999) is False
+
+
+class TestSymbolInAnnotations:
+    """Test _symbol_in_annotations type hint detection."""
+
+    def test_detects_return_type(self, setup_scanner):
+        """Detects symbol in return type annotation."""
+        scanner, _, _ = setup_scanner
+
+        content = "def get_items() -> List:\n    return []"
+
+        assert scanner._symbol_in_annotations(content, "List") is True
+
+    def test_detects_parameter_annotation(self, setup_scanner):
+        """Detects symbol in parameter annotation."""
+        scanner, _, _ = setup_scanner
+
+        content = "def process(items: List) -> None:\n    pass"
+
+        assert scanner._symbol_in_annotations(content, "List") is True
+
+    def test_detects_variable_annotation(self, setup_scanner):
+        """Detects symbol in variable annotation."""
+        scanner, _, _ = setup_scanner
+
+        content = "items: List = []"
+
+        assert scanner._symbol_in_annotations(content, "List") is True
+
+    def test_detects_generic_parameter(self, setup_scanner):
+        """Detects symbol as generic parameter."""
+        scanner, _, _ = setup_scanner
+
+        content = "def process() -> Dict[str, MyType]:\n    pass"
+
+        assert scanner._symbol_in_annotations(content, "MyType") is True
+
+    def test_no_match_in_regular_code(self, setup_scanner):
+        """Does not match symbol in regular code."""
+        scanner, _, _ = setup_scanner
+
+        content = "x = List"  # Assignment, not annotation
+
+        assert scanner._symbol_in_annotations(content, "List") is False
+
+
+class TestAstCheckUsage:
+    """Test _ast_check_usage AST cross-check."""
+
+    def test_detects_usage_via_ast(self, setup_scanner):
+        """AST check finds symbol usage."""
+        scanner, _, _ = setup_scanner
+
+        content = '''import json
+
+def process():
+    return json.dumps({})
+'''
+
+        result = scanner._ast_check_usage(content, "json", 1)
+
+        assert result is True
+
+    def test_no_usage_via_ast(self, setup_scanner):
+        """AST check confirms no usage."""
+        scanner, _, _ = setup_scanner
+
+        content = '''import json
+
+def process():
+    return {}
+'''
+
+        result = scanner._ast_check_usage(content, "json", 1)
+
+        assert result is False
+
+    def test_handles_syntax_error(self, setup_scanner):
+        """Returns None for invalid Python syntax."""
+        scanner, _, _ = setup_scanner
+
+        content = '''import json
+def broken(
+    # missing closing paren
+'''
+
+        result = scanner._ast_check_usage(content, "json", 1)
+
+        assert result is None
+
+    def test_detects_attribute_access(self, setup_scanner):
+        """Detects symbol used in attribute access."""
+        scanner, _, _ = setup_scanner
+
+        content = '''import os
+
+path = os.path.join("a", "b")
+'''
+
+        result = scanner._ast_check_usage(content, "os", 1)
+
+        assert result is True
+
+
+# =============================================================================
+# Remove Symbol from Import Tests
+# =============================================================================
+
+class TestRemoveSymbolFromImport:
+    """Test _remove_symbol_from_import line manipulation."""
+
+    def test_removes_single_import(self, setup_scanner):
+        """Returns None for single import (delete line)."""
+        scanner, _, _ = setup_scanner
+
+        result = scanner._remove_symbol_from_import("import json", "json")
+
+        assert result is None
+
+    def test_removes_from_import_single(self, setup_scanner):
+        """Returns None for single from-import (delete line)."""
+        scanner, _, _ = setup_scanner
+
+        result = scanner._remove_symbol_from_import("from typing import List", "List")
+
+        assert result is None
+
+    def test_removes_from_multi_import(self, setup_scanner):
+        """Removes symbol from multi-import line."""
+        scanner, _, _ = setup_scanner
+
+        result = scanner._remove_symbol_from_import(
+            "from typing import List, Dict, Optional", "Dict"
+        )
+
+        assert result == "from typing import List, Optional"
+
+    def test_preserves_indentation(self, setup_scanner):
+        """Preserves original indentation."""
+        scanner, _, _ = setup_scanner
+
+        result = scanner._remove_symbol_from_import(
+            "    from typing import List, Dict", "Dict"
+        )
+
+        assert result.startswith("    ")
+        assert "List" in result
+        assert "Dict" not in result
+
+    def test_handles_as_alias(self, setup_scanner):
+        """Handles 'as alias' imports."""
+        scanner, _, _ = setup_scanner
+
+        result = scanner._remove_symbol_from_import(
+            "import json as j", "json"
+        )
+
+        assert result is None
+
+    def test_removes_with_alias_from_multi(self, setup_scanner):
+        """Removes aliased import from multi-import."""
+        scanner, _, _ = setup_scanner
+
+        result = scanner._remove_symbol_from_import(
+            "from typing import List, Dict as D, Optional", "Dict"
+        )
+
+        assert result == "from typing import List, Optional"
+
+    def test_returns_unchanged_if_not_found(self, setup_scanner):
+        """Returns original line if symbol not found."""
+        scanner, _, _ = setup_scanner
+
+        original = "from typing import List"
+        result = scanner._remove_symbol_from_import(original, "Dict")
+
+        assert result == original
+
+    def test_handles_parenthesized_imports(self, setup_scanner):
+        """Handles parenthesized multi-line imports."""
+        scanner, _, _ = setup_scanner
+
+        result = scanner._remove_symbol_from_import(
+            "from typing import (List, Dict, Optional)", "Dict"
+        )
+
+        assert "List" in result
+        assert "Optional" in result
+        assert "Dict" not in result
+
+
+# =============================================================================
+# Verify Single Finding Tests
+# =============================================================================
+
+class TestVerifySingleFinding:
+    """Test _verify_single_finding hybrid verification."""
+
+    def test_returns_uncertain_for_missing_file(self, setup_scanner):
+        """Returns UNCERTAIN when file doesn't exist."""
+        scanner, _, _ = setup_scanner
+
+        finding = ScanFinding(
+            severity="info",
+            category="unused-import",
+            title="Test",
+            description="Test",
+            suggestion="Test",
+            file="/nonexistent/path/file.py",
+            line=1,
+            symbol="foo"
+        )
+
+        result = scanner._verify_single_finding(finding)
+
+        assert result == UNCERTAIN
+
+    def test_returns_uncertain_for_missing_symbol(self, setup_scanner):
+        """Returns UNCERTAIN when symbol is None."""
+        scanner, _, _ = setup_scanner
+
+        finding = ScanFinding(
+            severity="info",
+            category="test",
+            title="Test",
+            description="Test",
+            suggestion="Test",
+            file="some_file.py",
+            line=1,
+            symbol=None
+        )
+
+        result = scanner._verify_single_finding(finding)
+
+        assert result == UNCERTAIN
+
+    def test_verifies_unused_import_as_true(self, setup_scanner, temp_python_file):
+        """Marks truly unused import as VERIFIED_TRUE."""
+        scanner, _, _ = setup_scanner
+
+        file_path = temp_python_file('''import json
+
+def process():
+    return {}
+''')
+
+        finding = ScanFinding(
+            severity="info",
+            category="unused-import",
+            title="Unused import",
+            description="`json` imported but unused",
+            suggestion="Remove import",
+            file=str(file_path),
+            line=1,
+            symbol="json"
+        )
+
+        result = scanner._verify_single_finding(finding)
+
+        assert result == VERIFIED_TRUE
+
+    def test_verifies_used_import_as_false(self, setup_scanner, temp_python_file):
+        """Marks used import as VERIFIED_FALSE."""
+        scanner, _, _ = setup_scanner
+
+        file_path = temp_python_file('''import json
+
+def process():
+    return json.dumps({})
+''')
+
+        finding = ScanFinding(
+            severity="info",
+            category="unused-import",
+            title="Unused import",
+            description="`json` imported but unused",
+            suggestion="Remove import",
+            file=str(file_path),
+            line=1,
+            symbol="json"
+        )
+
+        result = scanner._verify_single_finding(finding)
+
+        assert result == VERIFIED_FALSE
+
+    def test_detects_init_reexport_as_false(self, setup_scanner, tmp_path):
+        """Marks __init__.py re-exports as VERIFIED_FALSE."""
+        scanner, _, _ = setup_scanner
+
+        # Create __init__.py with re-export
+        init_file = tmp_path / "__init__.py"
+        init_file.write_text("from .module import SomeClass\n")
+
+        finding = ScanFinding(
+            severity="info",
+            category="unused-import",
+            title="Unused import",
+            description="`SomeClass` imported but unused",
+            suggestion="Remove import",
+            file=str(init_file),
+            line=1,
+            symbol="SomeClass"
+        )
+
+        result = scanner._verify_single_finding(finding)
+
+        assert result == VERIFIED_FALSE
+
+    def test_detects_all_export_as_false(self, setup_scanner, temp_python_file):
+        """Marks symbols in __all__ as VERIFIED_FALSE."""
+        scanner, _, _ = setup_scanner
+
+        file_path = temp_python_file('''from typing import List
+
+__all__ = ["List", "process"]
+
+def process():
+    pass
+''')
+
+        finding = ScanFinding(
+            severity="info",
+            category="unused-import",
+            title="Unused import",
+            description="`List` imported but unused",
+            suggestion="Remove import",
+            file=str(file_path),
+            line=1,
+            symbol="List"
+        )
+
+        result = scanner._verify_single_finding(finding)
+
+        assert result == VERIFIED_FALSE
+
+
+# =============================================================================
+# Verify Findings (Batch) Tests
+# =============================================================================
+
+class TestVerifyFindings:
+    """Test verify_findings batch verification."""
+
+    def test_empty_findings_returns_zero_counts(self, setup_scanner):
+        """Returns zero counts when no findings exist."""
+        scanner, _, _ = setup_scanner
+
+        result = scanner.verify_findings("clean")
+
+        assert result["verified_true"] == 0
+        assert result["verified_false"] == 0
+        assert result["uncertain"] == 0
+        assert result["findings"] == []
+
+    def test_skips_already_verified_findings(self, setup_scanner, temp_python_file):
+        """Skips findings that are already verified."""
+        scanner, _, _ = setup_scanner
+
+        file_path = temp_python_file("import json\n")
+
+        finding = ScanFinding(
+            severity="info",
+            category="unused-import",
+            title="Test",
+            description="Test",
+            suggestion="Test",
+            finding_id="test_already_verified",
+            file=str(file_path),
+            line=1,
+            symbol="json",
+            status=VERIFIED_TRUE  # Already verified
+        )
+
+        scanner._save_findings("clean", [finding])
+
+        result = scanner.verify_findings("clean")
+
+        # Should count existing status, not re-verify
+        assert result["verified_true"] == 1
+
+    def test_updates_findings_file(self, setup_scanner, temp_python_file):
+        """Persists verification results to findings file."""
+        scanner, _, _ = setup_scanner
+
+        file_path = temp_python_file('''import json
+
+def process():
+    return {}
+''')
+
+        finding = ScanFinding(
+            severity="info",
+            category="unused-import",
+            title="Test",
+            description="Test",
+            suggestion="Test",
+            finding_id="test_persist",
+            file=str(file_path),
+            line=1,
+            symbol="json",
+            status="pending"
+        )
+
+        scanner._save_findings("clean", [finding])
+        scanner.verify_findings("clean")
+
+        # Reload and check status was updated
+        loaded = scanner._load_findings("clean")
+        assert len(loaded) == 1
+        assert loaded[0].status == VERIFIED_TRUE
+
+
+# =============================================================================
+# Remove Verified Imports Tests
+# =============================================================================
+
+class TestRemoveVerifiedImports:
+    """Test remove_verified_imports safe removal with mocked git."""
+
+    def test_requires_findings(self, setup_scanner):
+        """Returns error when no findings exist."""
+        scanner, _, _ = setup_scanner
+
+        result = scanner.remove_verified_imports("clean")
+
+        assert result["success"] is False
+        assert "No findings" in result["error"]
+
+    def test_requires_verified_status(self, setup_scanner, temp_python_file):
+        """Returns error when findings exist but not verified."""
+        scanner, _, _ = setup_scanner
+
+        file_path = temp_python_file("import json\n")
+
+        finding = ScanFinding(
+            severity="info",
+            category="unused-import",
+            title="Test",
+            description="Test",
+            suggestion="Test",
+            finding_id="test_not_verified",
+            file=str(file_path),
+            line=1,
+            symbol="json",
+            status="pending"  # Not verified
+        )
+
+        scanner._save_findings("clean", [finding])
+
+        result = scanner.remove_verified_imports("clean")
+
+        assert result["success"] is False
+        assert "Run --verify first" in result["error"]
+
+    @patch('babel.services.scanner.Scanner._git_create_checkpoint')
+    def test_fails_on_dirty_working_directory(self, mock_checkpoint, setup_scanner, temp_python_file):
+        """Fails when git checkpoint cannot be created (dirty directory)."""
+        scanner, _, _ = setup_scanner
+        mock_checkpoint.return_value = None  # Simulates dirty directory
+
+        file_path = temp_python_file("import json\n")
+
+        finding = ScanFinding(
+            severity="info",
+            category="unused-import",
+            title="Test",
+            description="Test",
+            suggestion="Test",
+            finding_id="test_dirty",
+            file=str(file_path),
+            line=1,
+            symbol="json",
+            status=VERIFIED_TRUE
+        )
+
+        scanner._save_findings("clean", [finding])
+
+        result = scanner.remove_verified_imports("clean")
+
+        assert result["success"] is False
+        assert "checkpoint" in result["error"].lower()
+
+    @patch('babel.services.scanner.Scanner._git_create_checkpoint')
+    @patch('babel.services.scanner.Scanner._run_affected_tests')
+    def test_removes_verified_imports(self, mock_tests, mock_checkpoint, setup_scanner, temp_python_file):
+        """Successfully removes verified imports."""
+        scanner, _, _ = setup_scanner
+        mock_checkpoint.return_value = "abc123sha"
+        mock_tests.return_value = {"success": True, "tests_run": 0}
+
+        file_path = temp_python_file('''import json
+
+def process():
+    return {}
+''')
+
+        finding = ScanFinding(
+            severity="info",
+            category="unused-import",
+            title="Test",
+            description="Test",
+            suggestion="Test",
+            finding_id="test_remove",
+            file=str(file_path),
+            line=1,
+            symbol="json",
+            status=VERIFIED_TRUE
+        )
+
+        scanner._save_findings("clean", [finding])
+
+        result = scanner.remove_verified_imports("clean", run_tests=True)
+
+        assert result["success"] is True
+        assert result["removed_count"] == 1
+        assert result["checkpoint_sha"] == "abc123sha"
+
+        # Verify file was modified
+        content = file_path.read_text()
+        assert "import json" not in content
+
+    @patch('babel.services.scanner.Scanner._git_create_checkpoint')
+    @patch('babel.services.scanner.Scanner._git_revert_checkpoint')
+    @patch('babel.services.scanner.Scanner._run_affected_tests')
+    def test_reverts_on_test_failure(self, mock_tests, mock_revert, mock_checkpoint, setup_scanner, temp_python_file):
+        """Auto-reverts when tests fail (all-or-nothing atomicity)."""
+        scanner, _, _ = setup_scanner
+        mock_checkpoint.return_value = "checkpoint123"
+        mock_tests.return_value = {"success": False, "error": "Tests failed"}
+
+        file_path = temp_python_file('''import json
+
+def process():
+    return {}
+''')
+
+        finding = ScanFinding(
+            severity="info",
+            category="unused-import",
+            title="Test",
+            description="Test",
+            suggestion="Test",
+            finding_id="test_revert",
+            file=str(file_path),
+            line=1,
+            symbol="json",
+            status=VERIFIED_TRUE
+        )
+
+        scanner._save_findings("clean", [finding])
+
+        result = scanner.remove_verified_imports("clean", run_tests=True)
+
+        mock_revert.assert_called_once_with("checkpoint123")
+        assert result["success"] is False
+        assert "auto-reverted" in result["error"].lower()
+
+    @patch('babel.services.scanner.Scanner._git_create_checkpoint')
+    def test_skips_tests_when_disabled(self, mock_checkpoint, setup_scanner, temp_python_file):
+        """Skips test execution when run_tests=False."""
+        scanner, _, _ = setup_scanner
+        mock_checkpoint.return_value = "sha456"
+
+        file_path = temp_python_file('''import json
+
+def foo():
+    pass
+''')
+
+        finding = ScanFinding(
+            severity="info",
+            category="unused-import",
+            title="Test",
+            description="Test",
+            suggestion="Test",
+            finding_id="test_no_tests",
+            file=str(file_path),
+            line=1,
+            symbol="json",
+            status=VERIFIED_TRUE
+        )
+
+        scanner._save_findings("clean", [finding])
+
+        result = scanner.remove_verified_imports("clean", run_tests=False)
+
+        assert result["success"] is True
+        assert result["test_results"] is None
+
+
+# =============================================================================
+# Finding Persistence Tests
+# =============================================================================
+
+class TestFindingPersistence:
+    """Test findings save/load functionality."""
+
+    def test_save_and_load_findings(self, setup_scanner):
+        """Findings are persisted and loaded correctly."""
+        scanner, _, _ = setup_scanner
+
+        findings = [
+            ScanFinding(
+                severity="info",
+                category="unused-import",
+                title="Test 1",
+                description="Desc 1",
+                suggestion="Sugg 1",
+                finding_id="persist_id1",
+                file="test.py",
+                line=1,
+                symbol="os"
+            ),
+            ScanFinding(
+                severity="warning",
+                category="unused-import",
+                title="Test 2",
+                description="Desc 2",
+                suggestion="Sugg 2",
+                finding_id="persist_id2",
+                file="test.py",
+                line=5,
+                symbol="json"
+            )
+        ]
+
+        scanner._save_findings("clean", findings)
+        loaded = scanner._load_findings("clean")
+
+        assert len(loaded) == 2
+        assert loaded[0].finding_id == "persist_id1"
+        assert loaded[1].finding_id == "persist_id2"
+
+    def test_get_finding_by_full_id(self, setup_scanner):
+        """get_finding finds by full ID."""
+        scanner, _, _ = setup_scanner
+
+        findings = [
+            ScanFinding(
+                severity="info",
+                category="test",
+                title="Test",
+                description="Test",
+                suggestion="Test",
+                finding_id="abcdef123456"
+            )
+        ]
+
+        scanner._save_findings("clean", findings)
+
+        found = scanner.get_finding("clean", "abcdef123456")
+        assert found is not None
+        assert found.finding_id == "abcdef123456"
+
+    def test_get_finding_by_prefix(self, setup_scanner):
+        """get_finding supports prefix matching."""
+        scanner, _, _ = setup_scanner
+
+        findings = [
+            ScanFinding(
+                severity="info",
+                category="test",
+                title="Test",
+                description="Test",
+                suggestion="Test",
+                finding_id="abcdef123456"
+            )
+        ]
+
+        scanner._save_findings("clean", findings)
+
+        # Prefix match (8 chars as displayed)
+        found = scanner.get_finding("clean", "abcdef12")
+        assert found is not None
+
+    def test_get_finding_not_found(self, setup_scanner):
+        """get_finding returns None when not found."""
+        scanner, _, _ = setup_scanner
+
+        scanner._save_findings("clean", [])
+
+        found = scanner.get_finding("clean", "nonexistent")
+        assert found is None
+
+
+# =============================================================================
+# Exclusion Tests
+# =============================================================================
+
+class TestExclusions:
+    """Test exclusion (false positive) management."""
+
+    def test_add_exclusion(self, setup_scanner):
+        """Adds exclusion and removes from active findings."""
+        scanner, _, _ = setup_scanner
+
+        findings = [
+            ScanFinding(
+                severity="info",
+                category="test",
+                title="Test",
+                description="Test",
+                suggestion="Test",
+                finding_id="exclude_me_123"
+            )
+        ]
+
+        scanner._save_findings("clean", findings)
+
+        result = scanner.add_exclusion("clean", "exclude_me_123", "False positive - re-export")
+
+        assert result is True
+
+        # Check exclusion stored
+        exclusions = scanner.get_exclusions("clean")
+        assert "exclude_me_123" in exclusions
+
+        # Check finding removed from active list
+        remaining = scanner._load_findings("clean")
+        assert len(remaining) == 0
+
+    def test_remove_exclusion(self, setup_scanner):
+        """Removes exclusion to re-enable finding."""
+        scanner, _, _ = setup_scanner
+
+        # Add exclusion first
+        scanner.add_exclusion("clean", "test_remove_id", "Was false positive")
+
+        # Remove it
+        result = scanner.remove_exclusion("clean", "test_remove_id")
+
+        assert result is True
+
+        exclusions = scanner.get_exclusions("clean")
+        assert "test_remove_id" not in exclusions
+
+    def test_cannot_add_duplicate_exclusion(self, setup_scanner):
+        """Returns False when exclusion already exists."""
+        scanner, _, _ = setup_scanner
+
+        scanner.add_exclusion("clean", "dup_test_id", "Reason 1")
+        result = scanner.add_exclusion("clean", "dup_test_id", "Reason 2")
+
+        assert result is False
+
+    def test_remove_nonexistent_exclusion(self, setup_scanner):
+        """Returns False when removing nonexistent exclusion."""
+        scanner, _, _ = setup_scanner
+
+        result = scanner.remove_exclusion("clean", "does_not_exist")
+
+        assert result is False
+
+
+# =============================================================================
+# Finding Summary Tests
+# =============================================================================
+
+class TestGetFindingsSummary:
+    """Test get_findings_summary counts."""
+
+    def test_empty_findings(self, setup_scanner):
+        """Returns zero counts for empty findings."""
+        scanner, _, _ = setup_scanner
+
+        summary = scanner.get_findings_summary("clean")
+
+        assert summary["pending"] == 0
+        assert summary["verified_true"] == 0
+        assert summary["verified_false"] == 0
+        assert summary["resolved"] == 0
+
+    def test_counts_by_status(self, setup_scanner):
+        """Correctly counts findings by status."""
+        scanner, _, _ = setup_scanner
+
+        findings = [
+            ScanFinding(severity="info", category="t", title="t", description="d",
+                       suggestion="s", finding_id="a", status="pending"),
+            ScanFinding(severity="info", category="t", title="t", description="d",
+                       suggestion="s", finding_id="b", status=VERIFIED_TRUE),
+            ScanFinding(severity="info", category="t", title="t", description="d",
+                       suggestion="s", finding_id="c", status=VERIFIED_TRUE),
+            ScanFinding(severity="info", category="t", title="t", description="d",
+                       suggestion="s", finding_id="d", status=VERIFIED_FALSE),
+            ScanFinding(severity="info", category="t", title="t", description="d",
+                       suggestion="s", finding_id="e", status="resolved"),
+        ]
+
+        scanner._save_findings("clean", findings)
+
+        summary = scanner.get_findings_summary("clean")
+
+        assert summary["pending"] == 1
+        assert summary["verified_true"] == 2
+        assert summary["verified_false"] == 1
+        assert summary["resolved"] == 1
+
+    def test_counts_exclusions(self, setup_scanner):
+        """Includes exclusion count in summary."""
+        scanner, _, _ = setup_scanner
+
+        scanner.add_exclusion("clean", "excl1", "Reason")
+        scanner.add_exclusion("clean", "excl2", "Reason")
+
+        summary = scanner.get_findings_summary("clean")
+
+        assert summary["excluded"] == 2
+
+
+# =============================================================================
+# Remove Import From File Tests
+# =============================================================================
+
+class TestRemoveImportFromFile:
+    """Test _remove_import_from_file file modification."""
+
+    def test_removes_single_import_line(self, setup_scanner, temp_python_file):
+        """Removes entire line for single import."""
+        scanner, _, _ = setup_scanner
+
+        file_path = temp_python_file('''import json
+
+def process():
+    return {}
+''')
+
+        result = scanner._remove_import_from_file(str(file_path), 1, "json")
+
+        assert result is True
+        content = file_path.read_text()
+        assert "import json" not in content
+        assert "def process" in content
+
+    def test_modifies_multi_import_line(self, setup_scanner, temp_python_file):
+        """Modifies line to remove one symbol from multi-import."""
+        scanner, _, _ = setup_scanner
+
+        file_path = temp_python_file('''from typing import List, Dict, Optional
+
+def process() -> List:
+    return []
+''')
+
+        result = scanner._remove_import_from_file(str(file_path), 1, "Dict")
+
+        assert result is True
+        content = file_path.read_text()
+        assert "List" in content
+        assert "Optional" in content
+        assert "Dict" not in content
+
+    def test_returns_false_for_nonexistent_file(self, setup_scanner):
+        """Returns False when file doesn't exist."""
+        scanner, _, _ = setup_scanner
+
+        result = scanner._remove_import_from_file("/nonexistent/file.py", 1, "json")
+
+        assert result is False
+
+    def test_returns_false_for_invalid_line(self, setup_scanner, temp_python_file):
+        """Returns False for out-of-bounds line number."""
+        scanner, _, _ = setup_scanner
+
+        file_path = temp_python_file("import json\n")
+
+        assert scanner._remove_import_from_file(str(file_path), 0, "json") is False
+        assert scanner._remove_import_from_file(str(file_path), 999, "json") is False
+
+    def test_returns_false_when_symbol_not_found(self, setup_scanner, temp_python_file):
+        """Returns False when symbol not in import line."""
+        scanner, _, _ = setup_scanner
+
+        file_path = temp_python_file("from typing import List\n")
+
+        result = scanner._remove_import_from_file(str(file_path), 1, "Dict")
+
+        assert result is False
+
+
+# =============================================================================
+# Clean Scan Tests (with mocked ruff)
+# =============================================================================
+
+class TestCleanScan:
+    """Test _scan_clean with mocked ruff."""
+
+    @patch('shutil.which')
+    def test_returns_warning_when_ruff_not_installed(self, mock_which, setup_scanner):
+        """Returns warning when ruff is not available."""
+        scanner, _, _ = setup_scanner
+        mock_which.return_value = None  # ruff not found
+
+        result = scanner._scan_clean()
+
+        assert result.scan_type == "clean"
+        assert result.status == "concerns"
+        assert len(result.findings) == 1
+        assert "Ruff Not Installed" in result.findings[0].title
+
+    @patch('shutil.which')
+    @patch('subprocess.run')
+    def test_parses_ruff_findings(self, mock_run, mock_which, setup_scanner):
+        """Parses ruff JSON output into ScanFindings."""
+        scanner, _, _ = setup_scanner
+        mock_which.return_value = "/usr/bin/ruff"
+
+        # Mock ruff JSON output
+        ruff_output = json.dumps([
+            {
+                "code": "F401",
+                "message": "`json` imported but unused",
+                "filename": "test.py",
+                "location": {"row": 1, "column": 1},
+                "fix": {"applicability": "safe"}
+            }
+        ])
+        mock_run.return_value = Mock(stdout=ruff_output, stderr="", returncode=1)
+
+        result = scanner._scan_clean()
+
+        assert result.scan_type == "clean"
+        assert len(result.findings) == 1
+        assert result.findings[0].code == "F401"
+        assert result.findings[0].symbol == "json"
+        assert result.findings[0].file == "test.py"
+        assert result.findings[0].line == 1
+
+    @patch('shutil.which')
+    @patch('subprocess.run')
+    def test_handles_empty_ruff_output(self, mock_run, mock_which, setup_scanner):
+        """Handles empty ruff output (no findings)."""
+        scanner, _, _ = setup_scanner
+        mock_which.return_value = "/usr/bin/ruff"
+        mock_run.return_value = Mock(stdout="", stderr="", returncode=0)
+
+        result = scanner._scan_clean()
+
+        assert result.scan_type == "clean"
+        assert result.status == "healthy"
+        assert len(result.findings) == 0
+
+    @patch('shutil.which')
+    @patch('subprocess.run')
+    def test_excludes_findings_in_exclusion_list(self, mock_run, mock_which, setup_scanner):
+        """Filters out excluded findings."""
+        scanner, _, _ = setup_scanner
+        mock_which.return_value = "/usr/bin/ruff"
+
+        # Add an exclusion
+        scanner._save_exclusions("clean", {"finding_abc": {"reason": "False positive"}})
+
+        # Mock ruff output with finding that matches exclusion
+        ruff_output = json.dumps([
+            {
+                "code": "F401",
+                "message": "`json` imported but unused",
+                "filename": "test.py",
+                "location": {"row": 1, "column": 1}
+            }
+        ])
+        mock_run.return_value = Mock(stdout=ruff_output, stderr="", returncode=1)
+
+        # Patch _generate_finding_id to return our excluded ID
+        with patch.object(scanner, '_generate_finding_id', return_value="finding_abc"):
+            result = scanner._scan_clean()
+
+        # Finding should be excluded
+        assert len(result.findings) == 0

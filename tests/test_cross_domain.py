@@ -10,7 +10,6 @@ P10: Cross-Domain Learning
 "Concept drift arises when underlying contexts change."
 """
 
-import pytest
 
 from babel.core.domains import (
     analyze_cross_domain, CrossDomainInfo,

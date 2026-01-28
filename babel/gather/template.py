@@ -13,7 +13,7 @@ The template format is designed for LLM consumption:
 - Code blocks with language hints
 """
 
-from typing import List, Optional, Dict
+from typing import List
 from datetime import datetime, timezone
 from pathlib import Path
 

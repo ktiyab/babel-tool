@@ -12,9 +12,7 @@ Aligns with:
 """
 
 import pytest
-from unittest.mock import Mock, patch, MagicMock
-from io import StringIO
-import sys
+from unittest.mock import Mock, patch
 
 from babel.commands.gaps import GapsCommand
 
@@ -201,7 +199,8 @@ class TestFindUnlinkedCommits:
     def test_all_commits_linked_returns_empty(self, gaps_command):
         """Returns empty when all commits are linked."""
         mock_git = Mock()
-        mock_git._run_git.return_value = "abc123def456|Fix bug\n"
+        # Format: sha|date|message (P12 temporal attribution)
+        mock_git._run_git.return_value = "abc123def456|2026-01-28T10:00:00Z|Fix bug\n"
 
         linked_shas = {"abc123def456"}
 
@@ -212,7 +211,8 @@ class TestFindUnlinkedCommits:
     def test_unlinked_commit_returned(self, gaps_command):
         """Returns unlinked commits."""
         mock_git = Mock()
-        mock_git._run_git.return_value = "abc123def456|Add feature\n"
+        # Format: sha|date|message (P12 temporal attribution)
+        mock_git._run_git.return_value = "abc123def456|2026-01-28T10:00:00Z|Add feature\n"
 
         linked_shas = set()
 
@@ -222,11 +222,13 @@ class TestFindUnlinkedCommits:
         assert result[0]["sha"] == "abc123def456"
         assert result[0]["short_sha"] == "abc123de"
         assert result[0]["message"] == "Add feature"
+        assert result[0]["date"] == "2026-01-28T10:00:00Z"  # P12: date captured
 
     def test_prefix_matching_works(self, gaps_command):
         """Prefix matching identifies linked commits."""
         mock_git = Mock()
-        mock_git._run_git.return_value = "abc123def456789|Add feature\n"
+        # Format: sha|date|message (P12 temporal attribution)
+        mock_git._run_git.return_value = "abc123def456789|2026-01-28T10:00:00Z|Add feature\n"
 
         # Linked with prefix
         linked_shas = {"abc123de"}
@@ -239,9 +241,10 @@ class TestFindUnlinkedCommits:
     def test_merge_commits_excluded(self, gaps_command):
         """Merge commits are automatically excluded."""
         mock_git = Mock()
+        # Format: sha|date|message (P12 temporal attribution)
         mock_git._run_git.return_value = (
-            "abc123|Merge branch 'feature'\n"
-            "def456|Add feature\n"
+            "abc123|2026-01-28T10:00:00Z|Merge branch 'feature'\n"
+            "def456|2026-01-28T11:00:00Z|Add feature\n"
         )
 
         result = gaps_command._find_unlinked_commits(mock_git, set(), 20)
@@ -253,10 +256,11 @@ class TestFindUnlinkedCommits:
     def test_trivial_commits_excluded(self, gaps_command):
         """Trivial commits (bump version, changelog) are excluded."""
         mock_git = Mock()
+        # Format: sha|date|message (P12 temporal attribution)
         mock_git._run_git.return_value = (
-            "abc123|Bump version to 1.0.0\n"
-            "def456|Update changelog\n"
-            "ghi789|Add real feature\n"
+            "abc123|2026-01-28T10:00:00Z|Bump version to 1.0.0\n"
+            "def456|2026-01-28T11:00:00Z|Update changelog\n"
+            "ghi789|2026-01-28T12:00:00Z|Add real feature\n"
         )
 
         result = gaps_command._find_unlinked_commits(mock_git, set(), 20)
@@ -340,7 +344,7 @@ class TestGapsCommandOutput:
                     gaps_command.gaps()
 
         captured = capsys.readouterr()
-        assert "Implementation Gaps" in captured.out
+        assert "BABEL GAPS" in captured.out
         assert "decision(s) without commits" in captured.out
 
 
@@ -524,7 +528,8 @@ class TestGapsSemantics:
     def test_gaps_surfaces_implementation_without_intent(self, gaps_command):
         """Commits without decisions = implementation without intent (P9)."""
         mock_git = Mock()
-        mock_git._run_git.return_value = "abc123|Mystery change\n"
+        # Format: sha|date|message (P12 temporal attribution)
+        mock_git._run_git.return_value = "abc123|2026-01-28T10:00:00Z|Mystery change\n"
 
         result = gaps_command._find_unlinked_commits(mock_git, set(), 20)
 

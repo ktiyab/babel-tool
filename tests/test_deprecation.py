@@ -11,10 +11,9 @@ P7: Evidence-Weighted Memory
 """
 
 import pytest
-from pathlib import Path
 
 from babel.core.events import (
-    DualEventStore, Event, EventType,
+    DualEventStore, EventType,
     deprecate_artifact
 )
 from babel.core.scope import EventScope

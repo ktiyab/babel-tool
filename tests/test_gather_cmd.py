@@ -13,8 +13,7 @@ Aligns with:
 """
 
 import pytest
-from unittest.mock import Mock, patch, MagicMock
-from pathlib import Path
+from unittest.mock import Mock, patch
 
 from babel.commands.gather_cmd import GatherCommand
 from babel.gather.safety import SafetyViolation, SafetyCategory, BabelCommandSafety
@@ -67,7 +66,7 @@ class TestValidation:
         cmd.gather()
 
         captured = capsys.readouterr()
-        assert "No sources specified" in captured.out
+        assert "No Sources Specified" in captured.out
         assert "--help" in captured.out
 
     def test_shows_usage_when_no_sources(self, gather_command, capsys):

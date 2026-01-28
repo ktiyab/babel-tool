@@ -319,10 +319,15 @@ def get_provider(config: Config) -> LLMProvider:
     """
     Get LLM provider based on configuration.
 
-    Priority (remote API key takes precedence over local):
-      1. If remote provider configured AND API key set → use remote
-      2. If local provider (ollama) configured → use local
-      3. Otherwise → MockProvider with actionable error
+    Uses nested config structure:
+      - llm.active controls which config to use ("local", "remote", "auto")
+      - llm.local contains local LLM settings (Ollama)
+      - llm.remote contains remote LLM settings (Claude, OpenAI, Gemini)
+
+    Selection logic:
+      - "local": Use llm.local config with local provider
+      - "remote": Use llm.remote config with remote provider
+      - "auto": Use remote if API key available, else local
 
     Args:
         config: Application configuration
@@ -332,31 +337,41 @@ def get_provider(config: Config) -> LLMProvider:
     """
     llm = config.llm
 
-    # Remote providers (require API key)
+    # Provider class mappings
     remote_providers = {
         "claude": ClaudeProvider,
         "openai": OpenAIProvider,
         "gemini": GeminiProvider
     }
 
-    # Local providers (no API key needed)
     local_providers = {
         "ollama": OllamaProvider
     }
 
-    # Priority 1: Remote provider with API key
-    if llm.provider in remote_providers:
-        provider_class = remote_providers[llm.provider]
-        provider = provider_class(llm)
-        if provider.is_available:
-            return provider
+    # Get active config and whether it's local
+    active_config, is_local = llm.get_active_config()
 
-    # Priority 2: Local provider (ollama)
-    if llm.provider in local_providers:
-        provider_class = local_providers[llm.provider]
-        provider = provider_class(llm)
-        if provider.is_available:
-            return provider
+    if is_local:
+        # Use local provider with local config
+        provider_name = active_config.provider
+        if provider_name in local_providers:
+            provider_class = local_providers[provider_name]
+            provider = provider_class(active_config)
+            if provider.is_available:
+                return provider
+        # Fallback: try any local provider
+        for provider_class in local_providers.values():
+            provider = provider_class(active_config)
+            if provider.is_available:
+                return provider
+    else:
+        # Use remote provider with remote config
+        provider_name = active_config.provider
+        if provider_name in remote_providers:
+            provider_class = remote_providers[provider_name]
+            provider = provider_class(active_config)
+            if provider.is_available:
+                return provider
 
     # Fall back to mock if no provider available
     return MockProvider()
@@ -366,23 +381,26 @@ def get_provider_status(config: Config) -> str:
     """Get human-readable provider status."""
     llm = config.llm
 
-    # Handle local providers (no API key needed)
-    if llm.is_local:
+    # Get active config and whether it's local
+    active_config, is_local = llm.get_active_config()
+
+    if is_local:
+        # Local provider status
         provider = get_provider(config)
 
         if isinstance(provider, MockProvider):
             # Ollama not running
-            base_url = llm.effective_base_url or "http://localhost:11434"
+            base_url = active_config.effective_base_url
             return f"Ollama not running at {base_url}. Start with: ollama serve"
 
         if isinstance(provider, OllamaProvider):
-            return f"Ollama: {llm.effective_model} (local)"
+            return f"Ollama: {active_config.effective_model} (local, active={llm.active})"
 
-        return f"{llm.provider.title()}: {llm.effective_model} (local)"
+        return f"{active_config.provider.title()}: {active_config.effective_model} (local)"
 
-    # Handle remote providers (require API key)
-    if not llm.api_key:
-        return f"LLM not configured (set {llm.api_key_env} environment variable)"
+    # Remote provider status
+    if not active_config.api_key:
+        return f"LLM not configured (set {active_config.api_key_env} environment variable)"
 
     # Check if provider package is installed
     package_map = {
@@ -391,8 +409,8 @@ def get_provider_status(config: Config) -> str:
         "gemini": ("google.generativeai", "pip install google-generativeai")
     }
 
-    if llm.provider in package_map:
-        module_name, install_cmd = package_map[llm.provider]
+    if active_config.provider in package_map:
+        module_name, install_cmd = package_map[active_config.provider]
         try:
             __import__(module_name.split('.')[0])
         except ImportError:
@@ -404,4 +422,4 @@ def get_provider_status(config: Config) -> str:
         # Fallback - shouldn't reach here normally
         return "LLM unavailable (check configuration)"
 
-    return f"{llm.provider.title()}: {llm.effective_model}"
+    return f"{active_config.provider.title()}: {active_config.effective_model} (active={llm.active})"

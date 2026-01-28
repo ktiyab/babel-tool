@@ -24,8 +24,6 @@ import json
 from pathlib import Path
 from typing import Optional, List, Dict, Set, Any
 from dataclasses import dataclass, field
-from collections import defaultdict
-import re
 
 from .events import Event, EventType
 
@@ -318,7 +316,6 @@ def extract_topics(event: Event, vocabulary: 'Vocabulary' = None) -> List[str]:
     Uses vocabulary for semantic understanding.
     Falls back to word extraction if no vocabulary.
     """
-    from .vocabulary import Vocabulary
     
     topics: Set[str] = set()
     

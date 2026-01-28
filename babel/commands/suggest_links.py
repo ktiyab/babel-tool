@@ -15,7 +15,7 @@ Aligns with:
 - HC2: Human authority (suggests, doesn't auto-link)
 """
 
-from typing import List, Dict, Optional
+from typing import List, Dict
 from dataclasses import dataclass
 
 from rapidfuzz import fuzz
@@ -23,7 +23,9 @@ from rapidfuzz import fuzz
 from ..commands.base import BaseCommand
 from ..core.commit_links import CommitLinkStore
 from ..services.git import GitIntegration
+from ..presentation.formatters import generate_summary, format_timestamp
 from ..presentation.symbols import safe_print
+from ..presentation.template import OutputTemplate
 
 
 @dataclass
@@ -36,6 +38,8 @@ class LinkSuggestion:
     commit_message: str
     score: float  # 0-1 confidence score
     reasons: List[str]  # Why this match was suggested
+    commit_date: str = ''  # P12: Temporal attribution
+    decision_created_at: str = ''  # P12: Temporal attribution
 
 
 class SuggestLinksCommand(BaseCommand):
@@ -63,7 +67,12 @@ class SuggestLinksCommand(BaseCommand):
         git = GitIntegration(self.project_dir)
 
         if not git.is_git_repo:
-            print("Not a git repository.")
+            template = OutputTemplate(symbols=symbols)
+            template.header("BABEL SUGGEST-LINKS", "Git Error")
+            template.section("STATUS", "Not a git repository.")
+            template.footer("Run from within a git repository")
+            output = template.render(command="suggest-links", context={"git_error": True})
+            print(output)
             return
 
         # Get commit link store
@@ -77,22 +86,37 @@ class SuggestLinksCommand(BaseCommand):
             commits = self._get_recent_commits(git, from_recent)
 
         if not commits:
-            print("No commits found to analyze.")
+            template = OutputTemplate(symbols=symbols)
+            template.header("BABEL SUGGEST-LINKS", "No Commits")
+            template.section("STATUS", "No commits found to analyze.")
+            template.footer("Ensure repository has commits")
+            output = template.render(command="suggest-links", context={"no_commits": True})
+            print(output)
             return
 
         # Filter out already-linked commits
         unlinked_commits = [c for c in commits if c['sha'] not in already_linked]
 
         if not unlinked_commits:
-            print(f"{symbols.check_pass} All recent commits already have decision links.")
+            template = OutputTemplate(symbols=symbols)
+            template.header("BABEL SUGGEST-LINKS", "All Linked")
+            template.section("STATUS", f"{symbols.check_pass} All recent commits already have decision links.")
+            template.footer("No action needed")
+            output = template.render(command="suggest-links", context={"all_linked": True})
+            print(output)
             return
 
         # Get all decisions for matching
         decisions = self._get_linkable_decisions()
 
         if not decisions:
-            print("No decisions found to suggest links for.")
-            print("\nCapture decisions with: babel capture \"decision\" --batch")
+            template = OutputTemplate(symbols=symbols)
+            template.header("BABEL SUGGEST-LINKS", "No Decisions")
+            template.section("STATUS", "No decisions found to suggest links for.")
+            template.section("ACTION", "Capture decisions with: babel capture \"decision\" --batch")
+            template.footer("Capture decisions first, then run suggest-links")
+            output = template.render(command="suggest-links", context={"no_decisions": True})
+            print(output)
             return
 
         # Find suggestions
@@ -102,11 +126,14 @@ class SuggestLinksCommand(BaseCommand):
             all_suggestions.extend(suggestions)
 
         if not all_suggestions:
-            print(f"\nAnalyzed {len(unlinked_commits)} unlinked commit(s), no strong matches found.")
-            print("\nThis could mean:")
-            print("  - Commits are routine (no decision needed)")
-            print("  - Decisions haven't been captured yet")
-            print(f"\nTo link manually: babel link <decision_id> --to-commit <sha>")
+            template = OutputTemplate(symbols=symbols)
+            template.header("BABEL SUGGEST-LINKS", "No Matches")
+            template.section("ANALYSIS", f"Analyzed {len(unlinked_commits)} unlinked commit(s), no strong matches found.")
+            template.section("REASONS", "- Commits are routine (no decision needed)\n- Decisions haven't been captured yet")
+            template.section("ACTION", "To link manually: babel link <decision_id> --to-commit <sha>")
+            template.footer("No suggestions above threshold")
+            output = template.render(command="suggest-links", context={"no_matches": True})
+            print(output)
             return
 
         # Group by commit
@@ -116,51 +143,64 @@ class SuggestLinksCommand(BaseCommand):
                 by_commit[s.commit_sha] = []
             by_commit[s.commit_sha].append(s)
 
-        # Display suggestions
-        print(f"\n{symbols.llm_thinking} Link Suggestions")
-        print(f"(Analyzed {len(unlinked_commits)} unlinked commits)\n")
+        # Build suggestions output with OutputTemplate
+        template = OutputTemplate(symbols=symbols)
+        template.header("BABEL SUGGEST-LINKS", f"Analyzed {len(unlinked_commits)} Unlinked Commits")
+        template.legend({
+            "[###]": "high confidence (≥70%)",
+            "[## ]": "medium confidence (≥50%)",
+            "[#  ]": "low confidence (≥30%)"
+        })
 
-        for commit_sha, suggestions in by_commit.items():
+        # Build suggestions section
+        suggestion_lines = []
+        for commit_sha_key, suggestions in by_commit.items():
             # Sort by score descending
             suggestions.sort(key=lambda x: x.score, reverse=True)
 
-            commit_msg = suggestions[0].commit_message[:50]
-            print(f"Commit [{commit_sha[:8]}]: \"{commit_msg}\"")
+            commit_msg = generate_summary(suggestions[0].commit_message)
+            # P12: Time always shown for commit
+            commit_time = format_timestamp(suggestions[0].commit_date) if suggestions[0].commit_date else ''
+            commit_time_str = f" ({commit_time})" if commit_time else ""
+            suggestion_lines.append(f"Commit [{commit_sha_key[:8]}]: \"{commit_msg}\"{commit_time_str}")
 
             for s in suggestions[:3]:  # Top 3 per commit
                 score_bar = self._score_bar(s.score)
                 decision_alias = self._cli.codec.encode(s.decision_id)
-                safe_print(f"  {score_bar} [{decision_alias}] {s.decision_type}: {s.decision_summary[:40]}")
+                # P12: Time always shown for decision
+                decision_time = format_timestamp(s.decision_created_at) if s.decision_created_at else ''
+                decision_time_str = f" ({decision_time})" if decision_time else ""
+                suggestion_lines.append(f"  {score_bar} [{decision_alias}] {s.decision_type}: {generate_summary(s.decision_summary)}{decision_time_str}")
 
                 # Show reasons for high-confidence matches
                 if s.score >= 0.5 and s.reasons:
-                    print(f"       Reasons: {', '.join(s.reasons[:2])}")
+                    suggestion_lines.append(f"       Reasons: {', '.join(s.reasons[:2])}")
 
-            print()
+            suggestion_lines.append("")
 
-        # Action hints
+        template.section("SUGGESTIONS", "\n".join(suggestion_lines))
+
+        # Strongest match section
         total_suggestions = len(all_suggestions)
-        print(f"Found {total_suggestions} suggestion(s) across {len(by_commit)} commit(s).\n")
-
         if all_suggestions:
             best = max(all_suggestions, key=lambda x: x.score)
             best_alias = self._cli.codec.encode(best.decision_id)
-            print(f"Strongest match:")
-            print(f"  babel link {best_alias} --to-commit {best.commit_sha[:8]}")
+            template.section("STRONGEST MATCH", f"babel link {best_alias} --to-commit {best.commit_sha[:8]}")
 
-        print(f"\nTo link: babel link <decision_id> --to-commit <commit_sha>")
+        # Actions section
+        template.section("ACTIONS", "To link: babel link <decision_id> --to-commit <commit_sha>")
 
-        # Succession hint
-        from ..output import end_command
-        end_command("suggest-links", {"suggestions": total_suggestions})
+        template.footer(f"Found {total_suggestions} suggestion(s) across {len(by_commit)} commit(s)")
+        output = template.render(command="suggest-links", context={"suggestions": total_suggestions})
+        print(output)
 
     def _get_recent_commits(self, git: GitIntegration, count: int) -> List[Dict]:
         """Get recent commits with their info."""
         commits = []
 
-        # Use git log to get recent commits
+        # Use git log to get recent commits (P12: include date)
         output = git._run_git([
-            "log", f"-{count}", "--format=%H|%s", "--no-merges"
+            "log", f"-{count}", "--format=%H|%aI|%s", "--no-merges"
         ])
 
         if not output:
@@ -169,9 +209,13 @@ class SuggestLinksCommand(BaseCommand):
         for line in output.strip().split('\n'):
             if '|' not in line:
                 continue
-            sha, message = line.split('|', 1)
+            parts = line.split('|', 2)
+            if len(parts) < 3:
+                continue
+            sha, date, message = parts
             commits.append({
                 'sha': sha,
+                'date': date,  # P12: Temporal attribution
                 'message': message
             })
 
@@ -185,6 +229,7 @@ class SuggestLinksCommand(BaseCommand):
 
         return [{
             'sha': commit_info.hash,
+            'date': commit_info.date if hasattr(commit_info, 'date') else '',  # P12: Temporal attribution
             'message': commit_info.message
         }]
 
@@ -204,6 +249,7 @@ class SuggestLinksCommand(BaseCommand):
                     'type': node_type,
                     'summary': summary,
                     'domain': node.content.get('domain', ''),
+                    'created_at': node.created_at,  # P12: Temporal attribution
                     'node': node
                 })
 
@@ -225,7 +271,9 @@ class SuggestLinksCommand(BaseCommand):
                     commit_sha=commit['sha'],
                     commit_message=commit['message'],
                     score=score,
-                    reasons=reasons
+                    reasons=reasons,
+                    commit_date=commit.get('date', ''),  # P12: Temporal attribution
+                    decision_created_at=decision.get('created_at', '')  # P12: Temporal attribution
                 ))
 
         return suggestions

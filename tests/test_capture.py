@@ -18,7 +18,7 @@ Aligns with:
 """
 
 import pytest
-from unittest.mock import Mock, patch, MagicMock
+from unittest.mock import Mock
 
 from babel.commands.capture import CaptureCommand
 from babel.core.events import EventType

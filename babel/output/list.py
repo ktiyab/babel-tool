@@ -8,7 +8,7 @@ Supports:
 - Scope markers (shared/local)
 """
 
-from typing import TYPE_CHECKING, List, Dict, Any, Optional
+from typing import TYPE_CHECKING, List, Dict
 
 from .base import BaseRenderer
 

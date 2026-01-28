@@ -17,10 +17,9 @@ Aligns with:
 """
 
 import pytest
-from unittest.mock import Mock, patch, MagicMock
+from unittest.mock import Mock, patch
 
 from babel.commands.status import StatusCommand
-from babel.core.events import EventType
 from tests.factories import BabelTestFactory
 
 
@@ -91,7 +90,7 @@ def status_command(babel_factory):
 class TestDisplayPurpose:
     """Test _display_purpose method for purpose formatting."""
 
-    def test_displays_summary_format(self, status_command, capsys):
+    def test_displays_summary_format(self, status_command):
         """Displays purpose with summary field."""
         cmd, factory = status_command
 
@@ -103,13 +102,12 @@ class TestDisplayPurpose:
             }
         }
 
-        cmd._display_purpose(content, full=False)
-        captured = capsys.readouterr()
+        result = cmd._display_purpose(content, full=False)
 
-        assert "Preserve intent" in captured.out
-        assert "Purpose:" in captured.out
+        assert "Preserve intent" in result
+        assert "Purpose:" in result
 
-    def test_displays_legacy_format(self, status_command, capsys):
+    def test_displays_legacy_format(self, status_command):
         """Displays purpose with legacy purpose field."""
         cmd, factory = status_command
 
@@ -118,14 +116,13 @@ class TestDisplayPurpose:
             "need": "Tools lose reasoning context"
         }
 
-        cmd._display_purpose(content, full=False)
-        captured = capsys.readouterr()
+        result = cmd._display_purpose(content, full=False)
 
-        assert "Build Babel" in captured.out
-        assert "Need:" in captured.out
-        assert "Tools lose" in captured.out
+        assert "Build Babel" in result
+        assert "Need:" in result
+        assert "Tools lose" in result
 
-    def test_shows_goal_when_full(self, status_command, capsys):
+    def test_shows_goal_when_full(self, status_command):
         """Shows goal detail when full=True."""
         cmd, factory = status_command
 
@@ -136,24 +133,22 @@ class TestDisplayPurpose:
             }
         }
 
-        cmd._display_purpose(content, full=True)
-        captured = capsys.readouterr()
+        result = cmd._display_purpose(content, full=True)
 
-        assert "Goal:" in captured.out
-        assert "Achieve specific" in captured.out
+        assert "Goal:" in result
+        assert "Achieve specific" in result
 
-    def test_handles_missing_fields(self, status_command, capsys):
+    def test_handles_missing_fields(self, status_command):
         """Handles content with minimal fields."""
         cmd, factory = status_command
 
         content = {}
 
         # Should not crash
-        cmd._display_purpose(content, full=False)
-        captured = capsys.readouterr()
+        result = cmd._display_purpose(content, full=False)
 
         # Should still output something
-        assert "Purpose" in captured.out
+        assert "Purpose" in result
 
 
 # =============================================================================
@@ -402,9 +397,9 @@ class TestCollectStatusData:
 # =============================================================================
 
 class TestShowGitSyncHealth:
-    """Test _show_git_sync_health for git-babel bridge display."""
+    """Test _format_git_sync_health for git-babel bridge display."""
 
-    def test_shows_link_count(self, status_command, capsys):
+    def test_shows_link_count(self, status_command):
         """Shows number of decision-commit links."""
         cmd, factory = status_command
 
@@ -418,12 +413,11 @@ class TestShowGitSyncHealth:
             mock_store.get_linked_commit_shas.return_value = set()
             mock_store_class.return_value = mock_store
 
-            cmd._show_git_sync_health(mock_git, full=False)
+            result = cmd._format_git_sync_health(mock_git, full=False)
 
-        captured = capsys.readouterr()
-        assert "Decision-commit links: 2" in captured.out
+        assert "Decision-commit links: 2" in result
 
-    def test_shows_unlinked_decisions_warning(self, status_command, capsys):
+    def test_shows_unlinked_decisions_warning(self, status_command):
         """Shows warning for unlinked decisions."""
         cmd, factory = status_command
 
@@ -440,12 +434,11 @@ class TestShowGitSyncHealth:
             mock_store.get_linked_commit_shas.return_value = set()
             mock_store_class.return_value = mock_store
 
-            cmd._show_git_sync_health(mock_git, full=False)
+            result = cmd._format_git_sync_health(mock_git, full=False)
 
-        captured = capsys.readouterr()
-        assert "Unlinked decisions:" in captured.out
+        assert "Unlinked decisions:" in result
 
-    def test_shows_unlinked_commits_warning(self, status_command, capsys):
+    def test_shows_unlinked_commits_warning(self, status_command):
         """Shows warning for unlinked commits."""
         cmd, factory = status_command
 
@@ -459,12 +452,11 @@ class TestShowGitSyncHealth:
             mock_store.get_linked_commit_shas.return_value = set()
             mock_store_class.return_value = mock_store
 
-            cmd._show_git_sync_health(mock_git, full=False)
+            result = cmd._format_git_sync_health(mock_git, full=False)
 
-        captured = capsys.readouterr()
-        assert "Unlinked commits" in captured.out
+        assert "Unlinked commits" in result
 
-    def test_shows_success_when_all_linked(self, status_command, capsys):
+    def test_shows_success_when_all_linked(self, status_command):
         """Shows success message when all artifacts are linked."""
         cmd, factory = status_command
 
@@ -478,11 +470,10 @@ class TestShowGitSyncHealth:
             mock_store.get_linked_commit_shas.return_value = set()
             mock_store_class.return_value = mock_store
 
-            cmd._show_git_sync_health(mock_git, full=False)
+            result = cmd._format_git_sync_health(mock_git, full=False)
 
-        captured = capsys.readouterr()
         # Either success message or gaps hint
-        assert "connected" in captured.out or "gaps" in captured.out
+        assert "connected" in result or "gaps" in result
 
 
 # =============================================================================
@@ -682,14 +673,13 @@ class TestEdgeCases:
         # Coherence is optional - only shown when checked
         assert "Project Health:" in captured.out or "Ready" in captured.out
 
-    def test_handles_purpose_with_no_detail(self, status_command, capsys):
+    def test_handles_purpose_with_no_detail(self, status_command):
         """Handles purpose content without detail field."""
         cmd, factory = status_command
 
         content = {"summary": "Simple purpose"}
 
-        cmd._display_purpose(content, full=True)
-        captured = capsys.readouterr()
+        result = cmd._display_purpose(content, full=True)
 
         # Should display without crashing
-        assert "Simple purpose" in captured.out
+        assert "Simple purpose" in result

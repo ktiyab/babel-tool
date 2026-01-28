@@ -10,13 +10,14 @@ HC2 preserved: Human approves themes (directional decisions),
 not individual atoms (micro-management).
 """
 
-from typing import Optional
 
 from .base import BaseCommand
 from ..core.events import Event, EventType, confirm_artifact, reject_proposal, require_negotiation
 from ..core.scope import EventScope
 from ..core.graph import Edge
+from ..presentation.formatters import generate_summary, format_timestamp
 from ..presentation.symbols import get_symbols, TableRenderer, safe_print
+from ..presentation.template import OutputTemplate
 from ..core.horizon import _extract_keywords
 
 
@@ -453,8 +454,17 @@ THEME: breaking-api-change | Old endpoints removed, clients must update | high |
         Shows all pending proposals with IDs for use with --accept.
         Dual-Display: [ID] + readable summary for comprehension AND action.
         """
-        print(f"{len(pending)} proposal(s) pending:\n")
+        # Build template
+        template = OutputTemplate(symbols=symbols)
+        template.header("BABEL REVIEW", "Pending Proposals (HC2: Human Authority)")
+        template.legend({
+            symbols.check_pass: "accept",
+            symbols.check_fail: "reject",
+            symbols.proposed: "pending"
+        })
 
+        # Build proposal list
+        proposal_lines = []
         for i, proposal_event in enumerate(pending):
             content = proposal_event.data.get('proposed', {})
             artifact_type = content.get('type', 'unknown')
@@ -462,26 +472,35 @@ THEME: breaking-api-change | Old endpoints removed, clients must update | high |
             rationale = content.get('rationale', '')
             formatted_id = self._cli.format_id(proposal_event.id)
 
-            # Dual-Display: [ID alias] [TYPE] summary
-            # Layer 2 (Encoding): Use safe_print for LLM-generated content
-            safe_print(f"{i+1}. {formatted_id} [{artifact_type.upper()}] {summary}")
+            # Dual-Display: [ID alias] [TYPE] summary (P12: timestamp)
+            time_str = f" ({format_timestamp(proposal_event.timestamp)})" if proposal_event.timestamp else ""
+            proposal_lines.append(f"{i+1}. {formatted_id} [{artifact_type.upper()}] {summary}{time_str}")
             if rationale:
-                safe_print(f"   WHY: {rationale[:80]}{'...' if len(rationale) > 80 else ''}")
-            print()
+                rationale_display = rationale[:80] + ('...' if len(rationale) > 80 else '')
+                proposal_lines.append(f"   WHY: {rationale_display}")
+            proposal_lines.append("")
 
-        print("Accept with:")
-        print("  babel review --accept <id>        # Accept specific proposal")
-        print("  babel review --accept-all         # Accept all proposals")
-        print("  babel review                      # Interactive review")
-        print()
-        print("Reject with:")
-        print("  babel review --reject <id>        # Reject specific proposal")
-        print("  babel review --reject <id> --reason \"...\"  # Reject with custom reason")
+        template.section(f"PROPOSALS ({len(pending)} pending)", "\n".join(proposal_lines))
 
-        # Succession hint
-        from ..output import end_command
+        # Actions section
+        actions = [
+            "Accept with:",
+            "  babel review --accept <id>        # Accept specific proposal",
+            "  babel review --accept-all         # Accept all proposals",
+            "  babel review                      # Interactive review",
+            "",
+            "Reject with:",
+            "  babel review --reject <id>        # Reject specific proposal",
+            "  babel review --reject <id> --reason \"...\"  # Reject with custom reason"
+        ]
+        template.section("ACTIONS", "\n".join(actions))
+
+        # Footer with succession hint
         has_decisions = any(p.data.get('proposed', {}).get('type') == 'decision' for p in pending)
-        end_command("review", {"has_decisions": has_decisions})
+        template.footer(f"{len(pending)} proposal(s) awaiting review")
+
+        output = template.render(command="review", context={"has_decisions": has_decisions})
+        print(output)
 
     def _list_proposals_as_output(self, pending: list):
         """Return proposal list as OutputSpec for rendering."""
@@ -498,8 +517,8 @@ THEME: breaking-api-change | Old endpoints removed, clients must update | high |
                 "n": i + 1,
                 "code": self._cli.codec.encode(proposal_event.id),
                 "type": artifact_type.upper(),
-                "summary": summary[:50],
-                "rationale": rationale[:40] if rationale else "-"
+                "summary": generate_summary(summary),
+                "rationale": generate_summary(rationale) if rationale else "-"
             })
 
         # Check if any are decisions (for context-aware hints)
@@ -528,9 +547,18 @@ THEME: breaking-api-change | Old endpoints removed, clients must update | high |
             accept_ids: List of proposal IDs, prefixes, or AA-BB code aliases
             symbols: Display symbols
         """
+        # Build template
+        template = OutputTemplate(symbols=symbols)
+        template.header("BABEL REVIEW", "Accept Proposals")
+        template.legend({
+            symbols.check_pass: "accepted",
+            symbols.check_fail: "not found"
+        })
+
         decisions_confirmed = []
         accepted = 0
         not_found = []
+        accepted_lines = []
 
         # Build candidate list for centralized resolution
         candidate_ids = [p.id for p in pending]
@@ -552,18 +580,29 @@ THEME: breaking-api-change | Old endpoints removed, clients must update | high |
             artifact_type = content.get('type', 'unknown')
             summary = content.get('summary', 'No summary')
 
-            # Layer 2 (Encoding): Use safe_print for LLM-generated content
-            safe_print(f"{symbols.check_pass} Accepted [{artifact_type.upper()}] {summary[:50]}...")
+            accepted_lines.append(f"{symbols.check_pass} [{artifact_type.upper()}] {generate_summary(summary)}")
 
             if result['artifact_type'] == 'decision':
                 decisions_confirmed.append(result)
 
-        if not_found:
-            print(f"\nNot found: {', '.join(not_found)}")
-            print("Use 'babel review --list' to see available IDs.")
+        # Build sections
+        if accepted_lines:
+            template.section(f"ACCEPTED ({accepted})", "\n".join(accepted_lines))
 
-        if accepted > 0:
-            print(f"\nAccepted {accepted} proposal(s).")
+        if not_found:
+            not_found_lines = [
+                f"Not found: {', '.join(not_found)}",
+                "Use 'babel review --list' to see available IDs."
+            ]
+            template.section("NOT FOUND", "\n".join(not_found_lines))
+
+        # Footer
+        template.footer(f"{accepted} proposal(s) accepted")
+        output = template.render(command="review", context={"has_decisions": len(decisions_confirmed) > 0})
+        print(output)
+
+        # Print validation hints separately (handles its own output)
+        if decisions_confirmed:
             self._print_validation_hints(decisions_confirmed, symbols)
 
     def _accept_all_proposals(self, pending: list, symbols):
@@ -574,9 +613,15 @@ THEME: breaking-api-change | Old endpoints removed, clients must update | high |
             pending: List of pending proposal events
             symbols: Display symbols
         """
-        decisions_confirmed = []
+        # Build template
+        template = OutputTemplate(symbols=symbols)
+        template.header("BABEL REVIEW", "Accept All Proposals")
+        template.legend({
+            symbols.check_pass: "accepted"
+        })
 
-        print(f"Accepting {len(pending)} proposal(s):\n")
+        decisions_confirmed = []
+        accepted_lines = []
 
         for proposal_event in pending:
             result = self._confirm_pending_proposal(proposal_event)
@@ -585,14 +630,20 @@ THEME: breaking-api-change | Old endpoints removed, clients must update | high |
             artifact_type = content.get('type', 'unknown')
             summary = content.get('summary', 'No summary')
 
-            # Layer 2 (Encoding): Use safe_print for LLM-generated content
-            safe_print(f"{symbols.check_pass} [{artifact_type.upper()}] {summary[:60]}...")
+            accepted_lines.append(f"{symbols.check_pass} [{artifact_type.upper()}] {generate_summary(summary)}")
 
             if result['artifact_type'] == 'decision':
                 decisions_confirmed.append(result)
 
-        print(f"\n{symbols.check_pass} Accepted all {len(pending)} proposal(s).")
-        self._print_validation_hints(decisions_confirmed, symbols)
+        template.section(f"ACCEPTED ({len(pending)} proposals)", "\n".join(accepted_lines))
+        template.footer(f"All {len(pending)} proposal(s) accepted")
+
+        output = template.render(command="review", context={"has_decisions": len(decisions_confirmed) > 0})
+        print(output)
+
+        # Print validation hints separately (handles its own output)
+        if decisions_confirmed:
+            self._print_validation_hints(decisions_confirmed, symbols)
 
     def _reject_by_ids(self, pending: list, reject_ids: list, reason: str, symbols):
         """
@@ -607,8 +658,17 @@ THEME: breaking-api-change | Old endpoints removed, clients must update | high |
             reason: Reason for rejection
             symbols: Display symbols
         """
+        # Build template
+        template = OutputTemplate(symbols=symbols)
+        template.header("BABEL REVIEW", "Reject Proposals (P8: Failure Metabolism)")
+        template.legend({
+            symbols.check_fail: "rejected",
+            symbols.check_warn: "not found"
+        })
+
         rejected = 0
         not_found = []
+        rejected_lines = []
 
         # Build candidate list for centralized resolution
         candidate_ids = [p.id for p in pending]
@@ -636,21 +696,26 @@ THEME: breaking-api-change | Old endpoints removed, clients must update | high |
             artifact_type = content.get('type', 'unknown')
             summary = content.get('summary', 'No summary')
 
-            # Layer 2 (Encoding): Use safe_print for LLM-generated content
-            safe_print(f"{symbols.check_fail} Rejected [{artifact_type.upper()}] {summary[:50]}...")
+            rejected_lines.append(f"{symbols.check_fail} [{artifact_type.upper()}] {generate_summary(summary)}")
             rejected += 1
 
+        # Build sections
+        if rejected_lines:
+            rejected_lines.append("")
+            rejected_lines.append(f"Reason: {reason}")
+            template.section(f"REJECTED ({rejected})", "\n".join(rejected_lines))
+
         if not_found:
-            print(f"\nNot found: {', '.join(not_found)}")
-            print("Use 'babel review --list' to see available IDs.")
+            not_found_lines = [
+                f"Not found: {', '.join(not_found)}",
+                "Use 'babel review --list' to see available IDs."
+            ]
+            template.section("NOT FOUND", "\n".join(not_found_lines))
 
-        if rejected > 0:
-            print(f"\nRejected {rejected} proposal(s).")
-            print(f"Reason: {reason}")
-
-            # Succession hint
-            from ..output import end_command
-            end_command("review", {})
+        # Footer
+        template.footer(f"{rejected} proposal(s) rejected — recorded for learning (P8)")
+        output = template.render(command="review", context={})
+        print(output)
 
     def _list_rejected(self, symbols):
         """
@@ -661,27 +726,35 @@ THEME: breaking-api-change | Old endpoints removed, clients must update | high |
 
         P8: "False artifacts → Lessons → Principles"
         """
+        # Build template
+        template = OutputTemplate(symbols=symbols)
+        template.header("BABEL REVIEW", "Rejected Proposals (P8: Failure Metabolism)")
+        template.legend({
+            symbols.check_fail: "rejected"
+        })
+
         # Get all rejection events
         rejected_events = self.events.read_by_type(EventType.PROPOSAL_REJECTED)
 
         if not rejected_events:
-            print("No rejected proposals.")
-            print("\nReject proposals with:")
-            print("  babel review --reject <id> --reason \"...\"")
-            from ..output import end_command
-            end_command("review", {})
+            template.section("STATUS", "No rejected proposals.")
+            template.section("ACTIONS", "Reject proposals with:\n  babel review --reject <id> --reason \"...\"")
+            template.footer("No rejections recorded")
+            output = template.render(command="review", context={})
+            print(output)
             return
 
         # Get all proposed events to look up original content
         proposed_events = self.events.read_by_type(EventType.STRUCTURE_PROPOSED)
         proposed_by_id = {e.id: e for e in proposed_events}
 
-        print(f"{len(rejected_events)} rejected proposal(s):\n")
-
+        # Build rejected list
+        rejected_lines = []
         for rejection in rejected_events:
             proposal_id = rejection.data.get('proposal_id', '')
             reason = rejection.data.get('reason', 'No reason provided')
-            rejection_date = rejection.timestamp[:10] if rejection.timestamp else 'Unknown'
+            # P12: Time always shown with proper formatting
+            rejection_time = format_timestamp(rejection.timestamp) if rejection.timestamp else 'Unknown'
 
             # Find original proposal
             original = proposed_by_id.get(proposal_id)
@@ -689,26 +762,37 @@ THEME: breaking-api-change | Old endpoints removed, clients must update | high |
                 content = original.data.get('proposed', {})
                 artifact_type = content.get('type', 'unknown')
                 summary = content.get('summary', 'No summary')
+                # P12: Also show when proposal was created
+                proposal_time = format_timestamp(original.timestamp) if original.timestamp else ''
             else:
                 artifact_type = 'unknown'
                 summary = 'Original proposal not found'
+                proposal_time = ''
 
             alias = self._cli.codec.encode(proposal_id) if proposal_id else 'unknown'
 
-            # Display: [ID] [TYPE] summary
-            safe_print(f"{symbols.check_fail} [{alias}] [{artifact_type.upper()}] {summary}")
-            safe_print(f"   REASON: {reason}")
-            print(f"   DATE: {rejection_date}")
-            print()
+            # Display: [ID] [TYPE] summary (P12: proposal time)
+            time_suffix = f" ({proposal_time})" if proposal_time else ""
+            rejected_lines.append(f"{symbols.check_fail} [{alias}] [{artifact_type.upper()}] {summary}{time_suffix}")
+            rejected_lines.append(f"   REASON: {reason}")
+            rejected_lines.append(f"   REJECTED: {rejection_time}")
+            rejected_lines.append("")
 
-        # P8 hint: Learn from rejections
-        print("P8 (Failure Metabolism): Rejections are lessons.")
-        print("Consider: What pattern led to these rejections?")
-        print("\nQuery rejection context with:")
-        print("  babel why \"rejected topic\"  (once indexed)")
+        template.section(f"REJECTED ({len(rejected_events)} proposals)", "\n".join(rejected_lines))
 
-        from ..output import end_command
-        end_command("review", {})
+        # P8 guidance
+        p8_lines = [
+            "P8 (Failure Metabolism): Rejections are lessons.",
+            "Consider: What pattern led to these rejections?",
+            "",
+            "Query rejection context with:",
+            "  babel why \"rejected topic\"  (once indexed)"
+        ]
+        template.section("LEARNING", "\n".join(p8_lines))
+
+        template.footer(f"{len(rejected_events)} rejection(s) — learn from what didn't work")
+        output = template.render(command="review", context={})
+        print(output)
 
     def _confirm_pending_proposal(self, proposal_event) -> dict:
         """
@@ -824,7 +908,7 @@ THEME: breaking-api-change | Old endpoints removed, clients must update | high |
         self.events.append(event, scope=EventScope.SHARED)
 
         # Layer 2 (Encoding): Use safe_print for LLM-generated content
-        safe_print(f"  {symbols.bullet} Recorded: {theme.get('recommendation', 'Review')} - {theme.get('rationale', 'No rationale')[:60]}...")
+        safe_print(f"  {symbols.bullet} Recorded: {theme.get('recommendation', 'Review')} - {generate_summary(theme.get('rationale', 'No rationale'))}")
 
     def _print_confirmation(self, result: dict, symbols):
         """Print detailed confirmation with validation hints for decisions."""
@@ -834,7 +918,7 @@ THEME: breaking-api-change | Old endpoints removed, clients must update | high |
 
         print(f"\nConfirmed: {artifact_type} [{node_id}]")
         # Layer 2 (Encoding): Use safe_print for LLM-generated content
-        safe_print(f"  \"{summary[:50]}{'...' if len(summary) > 50 else ''}\"")
+        safe_print(f"  \"{generate_summary(summary)}\"")
 
         if artifact_type == 'decision':
             print(f"\n  This decision needs validation:")
@@ -855,7 +939,7 @@ THEME: breaking-api-change | Old endpoints removed, clients must update | high |
         print(f"\n{len(decisions)} decision(s) registered for validation:")
         for d in decisions[:3]:
             # Layer 2 (Encoding): Use safe_print for LLM-generated content
-            safe_print(f"  [{d['node_id']}] {d['summary'][:40]}...")
+            safe_print(f"  [{d['node_id']}] {generate_summary(d['summary'])}")
         if len(decisions) > 3:
             print(f"  ... and {len(decisions) - 3} more")
         print(f"\nTo validate: babel endorse <id> and babel evidence-decision <id> \"...\"")
@@ -944,7 +1028,7 @@ THEME: breaking-api-change | Old endpoints removed, clients must update | high |
         print(f"\n  {symbols.tension} Advisory: This {artifact_type} touches constrained areas")
         for c in overlapping_constraints[:3]:
             short_id = c['id'][:8] if len(c['id']) > 8 else c['id']
-            print(f"    [{short_id}] {c['summary'][:50]}...")
+            print(f"    [{short_id}] {generate_summary(c['summary'])}")
             print(f"      Overlap: {', '.join(c['overlap'][:5])}")
         if len(overlapping_constraints) > 3:
             print(f"    ... and {len(overlapping_constraints) - 3} more")

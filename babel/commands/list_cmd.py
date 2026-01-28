@@ -15,45 +15,23 @@ Design principles:
 
 from typing import Optional, List
 from ..commands.base import BaseCommand
-from ..core.graph import Node
-from ..presentation.symbols import truncate, SUMMARY_LENGTH
+from ..presentation.formatters import get_node_summary, generate_summary, format_timestamp
+from ..presentation.template import OutputTemplate
 from ..utils.pagination import Paginator, DEFAULT_LIMIT
 
 
 # Artifact types that can be listed
 ARTIFACT_TYPES = ['decision', 'constraint', 'principle', 'purpose', 'tension']
 
-
-def _get_summary(node: Node) -> str:
-    """Extract human-readable summary from node content."""
-    content = node.content
-
-    # Try different fields in order of preference
-    if 'summary' in content:
-        return content['summary']
-    if 'purpose' in content:
-        return content['purpose']
-    if 'what' in content:
-        return content['what']
-
-    # Handle proposal nodes (nested 'proposed' dict)
-    proposed = content.get('proposed', {})
-    if isinstance(proposed, dict):
-        if 'summary' in proposed:
-            return proposed['summary']
-        if 'what' in proposed:
-            return proposed['what']
-
-    # Try nested detail
-    detail = content.get('detail', {})
-    if isinstance(detail, dict):
-        if 'what' in detail:
-            return detail['what']
-        if 'goal' in detail:
-            return detail['goal']
-
-    # Fallback
-    return str(content)[:SUMMARY_LENGTH]
+# Artifact type → actionable commands mapping (Legend Pattern)
+# Shown once per listing, not repeated per-item
+ARTIFACT_ACTIONS = {
+    'decision': ['link', 'why', 'endorse', 'evidence-decision', 'deprecate'],
+    'constraint': ['link', 'why', 'deprecate'],
+    'principle': ['link', 'why'],
+    'purpose': ['link', 'why'],
+    'tension': ['why', 'resolve', 'evidence'],
+}
 
 
 class ListCommand(BaseCommand):
@@ -73,8 +51,13 @@ class ListCommand(BaseCommand):
         symbols = self.symbols
         stats = self.graph.stats()
 
-        print(f"\n{symbols.purpose} Artifacts: {stats['nodes']} total")
-        print()
+        # Build template
+        template = OutputTemplate(symbols=symbols)
+        template.header("BABEL LIST", "Artifact Discovery")
+        template.legend({
+            symbols.purpose: "purpose",
+            symbols.arrow: "drill-down hint"
+        })
 
         # Count by type
         type_counts = {}
@@ -83,21 +66,30 @@ class ListCommand(BaseCommand):
             if nodes:
                 type_counts[artifact_type] = len(nodes)
 
-        # Display with hints
+        # Build type counts section
+        lines = [f"Total: {stats['nodes']} artifacts", ""]
         for artifact_type, count in sorted(type_counts.items(), key=lambda x: -x[1]):
-            print(f"  {artifact_type}s: {count:>4}  {symbols.arrow} babel list {artifact_type}s")
+            lines.append(f"  {artifact_type}s: {count:>4}  {symbols.arrow} babel list {artifact_type}s")
 
         # Show orphan count (O(1) lookup)
         orphan_count = self.graph.count_orphans()
         if orphan_count > 0:
-            print(f"\n  orphans: {orphan_count:>4}  {symbols.arrow} babel list --orphans")
+            lines.append(f"\n  orphans: {orphan_count:>4}  {symbols.arrow} babel list --orphans")
 
-        print()
-        print(f"Graph traversal: babel list --from <id>")
+        template.section("BY TYPE", "\n".join(lines))
 
-        # Succession hint
-        from ..output import end_command
-        end_command("list", {"has_orphans": orphan_count > 0})
+        # Navigation hint
+        template.section("TRAVERSAL", f"Graph traversal: babel list --from <id>")
+
+        # Footer summary
+        template.footer(f"{stats['nodes']} artifacts | {orphan_count} orphans")
+
+        # Render with succession hints
+        output = template.render(
+            command="list",
+            context={"has_orphans": orphan_count > 0}
+        )
+        print(output)
 
     def list_by_type(
         self,
@@ -138,7 +130,7 @@ class ListCommand(BaseCommand):
         # Apply filter if provided
         if filter_pattern:
             pattern_lower = filter_pattern.lower()
-            nodes = [n for n in nodes if pattern_lower in _get_summary(n).lower()]
+            nodes = [n for n in nodes if pattern_lower in get_node_summary(n).lower()]
 
             if not nodes:
                 print(f"\nNo {artifact_type}s matching '{filter_pattern}'.")
@@ -150,48 +142,71 @@ class ListCommand(BaseCommand):
         else:
             paginator = Paginator(nodes, limit=limit, offset=offset)
 
-        # Header
+        # Build template
         title = f"{artifact_type.capitalize()}s"
         if filter_pattern:
             title = f"{title} matching '{filter_pattern}'"
-        print(f"\n{paginator.header(title)}")
 
-        # Display artifacts (dual-display: ID alias + summary)
+        template = OutputTemplate(symbols=symbols)
+        template.header("BABEL LIST", title)
+
+        # Action legend (Legend Pattern: state once, not per-item)
+        actions = ARTIFACT_ACTIONS.get(artifact_type, ['link', 'why'])
+        action_legend = {f"[ID]": f"use with: {', '.join(actions)}"}
+        template.legend(action_legend)
+
+        # Build artifact list
+        lines = [paginator.header(title), ""]
         for node in paginator.items():
             formatted_id = self._cli.format_id(node.id)
-            summary = truncate(_get_summary(node), SUMMARY_LENGTH - 15)
-            print(f"  {formatted_id} {summary}")
+            summary = generate_summary(get_node_summary(node))
+            time_str = format_timestamp(node.created_at)
+            lines.append(f"  {formatted_id} {time_str} {summary}")
 
-        # Navigation hints
+        template.section("ARTIFACTS", "\n".join(lines))
+
+        # Navigation hints section
         cmd_base = f"babel list {artifact_type}s"
         if filter_pattern:
             cmd_base = f"{cmd_base} --filter \"{filter_pattern}\""
 
+        nav_lines = []
         if paginator.has_more():
-            print()
             next_offset = paginator.offset + paginator.limit
-            print(f"{symbols.arrow} Next: {cmd_base} --offset {next_offset}")
+            nav_lines.append(f"{symbols.arrow} Next: {cmd_base} --offset {next_offset}")
 
         if paginator.has_previous():
             prev_offset = max(0, paginator.offset - paginator.limit)
-            print(f"{symbols.arrow} Prev: {cmd_base} --offset {prev_offset}")
+            nav_lines.append(f"{symbols.arrow} Prev: {cmd_base} --offset {prev_offset}")
 
         if paginator.is_truncated() and not show_all:
-            print(f"{symbols.arrow} All: {cmd_base} --all")
+            nav_lines.append(f"{symbols.arrow} All: {cmd_base} --all")
 
-        # Succession hint
-        from ..output import end_command
-        end_command("list", {"type": artifact_type, "truncated": paginator.is_truncated()})
+        if nav_lines:
+            template.section("NAVIGATION", "\n".join(nav_lines))
+
+        # Footer summary
+        template.footer(f"{paginator.total} {artifact_type}s | showing {len(list(paginator.items()))} items")
+
+        # Render with succession hints
+        output = template.render(
+            command="list",
+            context={"type": artifact_type, "truncated": paginator.is_truncated()}
+        )
+        print(output)
 
     def list_from(self, artifact_id: str, depth: int = 1):
         """
         Show artifacts connected to a given artifact (graph traversal).
 
         Args:
-            artifact_id: ID of the starting artifact
+            artifact_id: ID (alias code or prefix) of the starting artifact
             depth: Traversal depth (default 1 = immediate connections)
         """
         symbols = self.symbols
+
+        # Resolve alias code to raw ID (counterpart to format_id for output)
+        artifact_id = self._cli.resolve_id(artifact_id)
 
         # Resolve ID using IDResolver (supports short codes via codec)
         result = self.resolver.resolve(artifact_id, codec=self.codec)
@@ -202,38 +217,61 @@ class ListCommand(BaseCommand):
 
         node = result.node
 
-        # Display the starting artifact (using alias formatting)
+        # Build template
         formatted_id = self._cli.format_id(node.id)
         alias_code = self._cli.codec.encode(node.id)  # For actionable hints
-        summary = truncate(_get_summary(node), SUMMARY_LENGTH)
-        print(f"\n{formatted_id} {summary}")
-        print(f"  Type: {node.type}")
+        summary = generate_summary(get_node_summary(node))
+        time_str = format_timestamp(node.created_at)
+
+        template = OutputTemplate(symbols=symbols)
+        template.header("BABEL LIST", f"Graph Traversal from {formatted_id}")
+        template.legend({
+            symbols.arrow: "connection direction"
+        })
+
+        # Origin section - P12: Time always shown
+        origin_lines = [
+            f"{formatted_id} {time_str} {summary}",
+            f"  Type: {node.type}"
+        ]
+        template.section("ORIGIN", "\n".join(origin_lines))
 
         # Get incoming edges (what points TO this artifact)
         incoming = self.graph.get_incoming(node.id)
         if incoming:
-            print(f"\n  {symbols.arrow} Supported by ({len(incoming)}):")
+            inc_lines = []
             for edge, source_node in incoming:
                 src_formatted = self._cli.format_id(source_node.id)
-                src_summary = truncate(_get_summary(source_node), SUMMARY_LENGTH - 20)
-                print(f"    {src_formatted} ({edge.relation}) {src_summary}")
+                src_summary = generate_summary(get_node_summary(source_node))
+                src_time = format_timestamp(source_node.created_at)
+                inc_lines.append(f"  {src_formatted} {src_time} ({edge.relation}) {src_summary}")
+            template.section(f"SUPPORTED BY ({len(incoming)})", "\n".join(inc_lines))
 
         # Get outgoing edges (what this artifact points TO)
         outgoing = self.graph.get_outgoing(node.id)
         if outgoing:
-            print(f"\n  {symbols.arrow} Informs ({len(outgoing)}):")
+            out_lines = []
             for edge, target_node in outgoing:
                 tgt_formatted = self._cli.format_id(target_node.id)
-                tgt_summary = truncate(_get_summary(target_node), SUMMARY_LENGTH - 20)
-                print(f"    {tgt_formatted} ({edge.relation}) {tgt_summary}")
+                tgt_summary = generate_summary(get_node_summary(target_node))
+                tgt_time = format_timestamp(target_node.created_at)
+                out_lines.append(f"  {tgt_formatted} {tgt_time} ({edge.relation}) {tgt_summary}")
+            template.section(f"INFORMS ({len(outgoing)})", "\n".join(out_lines))
 
+        # Orphan case
         if not incoming and not outgoing:
-            print(f"\n  No connections (orphan artifact)")
-            print(f"  {symbols.arrow} Link it: babel link {alias_code}")
+            template.section("STATUS", f"No connections (orphan artifact)\n  {symbols.arrow} Link it: babel link {alias_code}")
 
-        # Succession hint
-        from ..output import end_command
-        end_command("list", {"from_id": alias_code, "has_connections": bool(incoming or outgoing)})
+        # Footer summary
+        total_connections = len(incoming) + len(outgoing)
+        template.footer(f"{total_connections} connections | {len(incoming)} incoming | {len(outgoing)} outgoing")
+
+        # Render with succession hints
+        output = template.render(
+            command="list",
+            context={"from_id": alias_code, "has_connections": bool(incoming or outgoing)}
+        )
+        print(output)
 
     def list_orphans(self, limit: int = DEFAULT_LIMIT, offset: int = 0, show_all: bool = False):
         """
@@ -261,9 +299,13 @@ class ListCommand(BaseCommand):
         else:
             paginator = Paginator(orphans, limit=limit, offset=offset)
 
-        print(f"\n{symbols.tension} {paginator.header('Orphan Artifacts')}")
-        print("(No incoming connections — can't inform 'why' queries)")
-        print()
+        # Build template
+        template = OutputTemplate(symbols=symbols)
+        template.header("BABEL LIST", "Orphan Artifacts")
+        template.legend({
+            symbols.tension: "orphan (no incoming connections)"
+        })
+        template.scope("Can't inform 'why' queries — consider linking")
 
         # Group displayed items by type for clarity
         by_type = {}
@@ -273,33 +315,46 @@ class ListCommand(BaseCommand):
                 by_type[node_type] = []
             by_type[node_type].append(node)
 
+        # Build grouped content
+        lines = [paginator.header("Orphan Artifacts"), ""]
         for node_type, nodes in sorted(by_type.items()):
-            print(f"  [{node_type}] ({len(nodes)})")
+            lines.append(f"  [{node_type}] ({len(nodes)})")
             for node in nodes:
                 formatted_id = self._cli.format_id(node.id)
-                summary = truncate(_get_summary(node), SUMMARY_LENGTH - 20)
-                print(f"    {formatted_id} {summary}")
+                summary = generate_summary(get_node_summary(node))
+                time_str = format_timestamp(node.created_at)
+                lines.append(f"    {formatted_id} {time_str} {summary}")
 
-        # Navigation hints
+        template.section("ORPHANS", "\n".join(lines))
+
+        # Navigation hints section
         cmd_base = "babel list --orphans"
-        print()
+        nav_lines = []
 
         if paginator.has_more():
             next_offset = paginator.offset + paginator.limit
-            print(f"{symbols.arrow} Next: {cmd_base} --offset {next_offset}")
+            nav_lines.append(f"{symbols.arrow} Next: {cmd_base} --offset {next_offset}")
 
         if paginator.has_previous():
             prev_offset = max(0, paginator.offset - paginator.limit)
-            print(f"{symbols.arrow} Prev: {cmd_base} --offset {prev_offset}")
+            nav_lines.append(f"{symbols.arrow} Prev: {cmd_base} --offset {prev_offset}")
 
         if paginator.is_truncated() and not show_all:
-            print(f"{symbols.arrow} All: {cmd_base} --all")
+            nav_lines.append(f"{symbols.arrow} All: {cmd_base} --all")
 
-        print(f"{symbols.arrow} Link: babel link <id>")
+        nav_lines.append(f"{symbols.arrow} Link: babel link <id>")
 
-        # Succession hint
-        from ..output import end_command
-        end_command("list", {"orphans": True, "count": paginator.total})
+        template.section("ACTIONS", "\n".join(nav_lines))
+
+        # Footer summary
+        template.footer(f"{paginator.total} orphans | showing {len(list(paginator.items()))} items")
+
+        # Render with succession hints
+        output = template.render(
+            command="list",
+            context={"orphans": True, "count": paginator.total}
+        )
+        print(output)
 
 
 # =============================================================================

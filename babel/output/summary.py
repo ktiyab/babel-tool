@@ -8,7 +8,7 @@ Supports:
 - Warning/alert sections
 """
 
-from typing import TYPE_CHECKING, Dict, Any, List
+from typing import TYPE_CHECKING, Dict
 
 from .base import BaseRenderer
 

@@ -15,14 +15,14 @@ import hashlib
 import json
 from datetime import datetime, timezone
 from typing import Optional, List, Dict, Any, Tuple, TYPE_CHECKING
-from dataclasses import dataclass, field
-from pathlib import Path
+from dataclasses import dataclass
 
 from ..core.events import EventStore, Event, EventType, record_coherence_check, detect_tension
 from ..core.graph import GraphStore, Node
-from ..presentation.symbols import get_symbols, SymbolSet, format_artifact, format_status_line, truncate, SUMMARY_LENGTH
+from ..presentation.formatters import format_artifact, format_status_line, generate_summary
+from ..presentation.symbols import get_symbols, SymbolSet
 from ..config import Config
-from ..core.horizon import DigestBuilder, ArtifactDigest, CoherenceContext, _keywords_conflict, _extract_keywords
+from ..core.horizon import DigestBuilder, ArtifactDigest, CoherenceContext, _extract_keywords
 
 if TYPE_CHECKING:
     from ..services.providers import LLMProvider
@@ -1103,7 +1103,7 @@ def format_coherence_status(result: CoherenceResult, symbols: SymbolSet, verbose
             # Show original (to keep)
             original_short = _short_id(original_id)
             # Get original summary from first duplicate's similar content
-            original_summary = truncate(duplicates[0].summary, SUMMARY_LENGTH - 10, full)
+            original_summary = generate_summary(duplicates[0].summary, full=full)
             lines.append(f"  {symbols.coherent} [{original_short}] {original_summary} (KEEP)")
             # Show duplicates (to deprecate)
             for dup in duplicates:
@@ -1123,7 +1123,7 @@ def format_coherence_status(result: CoherenceResult, symbols: SymbolSet, verbose
         lines.append(f"Tensions ({result.tension_count}):")
         for entity in tension_entities:
             short_id = _short_id(entity.id)
-            summary = truncate(entity.summary, SUMMARY_LENGTH, full)
+            summary = generate_summary(entity.summary, full=full)
             # Show severity indicator
             severity_icon = {
                 'critical': '!!',
@@ -1147,7 +1147,7 @@ def format_coherence_status(result: CoherenceResult, symbols: SymbolSet, verbose
         for entity in result.entities:
             if entity.status == "low_alignment":
                 short_id = _short_id(entity.id)
-                summary = truncate(entity.summary, SUMMARY_LENGTH, full)
+                summary = generate_summary(entity.summary, full=full)
                 lines.append(f"  [{short_id}] {summary}")
                 if full and entity.reason:
                     lines.append(f"      {entity.reason}")
@@ -1199,7 +1199,7 @@ def format_coherence_report(result: CoherenceResult, symbols: SymbolSet, purpose
     # Purpose(s)
     for p in purposes:
         purpose_text = p.content.get('purpose', p.content.get('summary', ''))
-        lines.append(f"{symbols.purpose} Purpose: {truncate(purpose_text, SUMMARY_LENGTH, full)}")
+        lines.append(f"{symbols.purpose} Purpose: {generate_summary(purpose_text, full=full)}")
         lines.append(f"   Status: {symbols.coherent if result.status == 'coherent' else symbols.tension} {result.status}")
 
     lines.append("")
@@ -1208,7 +1208,7 @@ def format_coherence_report(result: CoherenceResult, symbols: SymbolSet, purpose
     if result.entities:
         lines.append("Findings:")
         for i, entity in enumerate(result.entities, 1):
-            summary = truncate(entity.summary, SUMMARY_LENGTH, full)
+            summary = generate_summary(entity.summary, full=full)
             lines.append(f"  {i}. {format_artifact(symbols, entity.node_type, summary, entity.status)}")
             if entity.reason:
                 lines.append(f"     - {entity.reason}")

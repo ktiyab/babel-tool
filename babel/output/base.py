@@ -13,7 +13,7 @@ ID Formatting:
 
 import os
 from abc import ABC, abstractmethod
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING
 import shutil
 
 if TYPE_CHECKING:

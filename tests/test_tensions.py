@@ -9,9 +9,8 @@ P4: Disagreement as Hypothesis
 """
 
 import pytest
-from pathlib import Path
 
-from babel.core.events import DualEventStore, Event, EventType
+from babel.core.events import DualEventStore, EventType
 from babel.tracking.tensions import (
     TensionTracker, Challenge,
     format_challenge, format_tensions_summary, format_challenge_in_context

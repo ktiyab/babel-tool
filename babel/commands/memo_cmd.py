@@ -15,7 +15,9 @@ Design principles:
 
 from typing import Optional, List
 from ..commands.base import BaseCommand
-from ..presentation.symbols import safe_print, truncate, SUMMARY_LENGTH
+from ..presentation.formatters import generate_summary, format_timestamp
+from ..presentation.symbols import safe_print
+from ..presentation.template import OutputTemplate
 
 
 class MemoCommand(BaseCommand):
@@ -38,24 +40,26 @@ class MemoCommand(BaseCommand):
         symbols = self.symbols
         memo = self._cli.memos.add(content, contexts, init=init)
 
+        template = OutputTemplate(symbols=symbols)
         init_marker = f" {symbols.purpose} INIT" if memo.init else ""
-        print(f"\n{symbols.check_pass} Memo saved:{init_marker}")
-        print(f"  {self._cli.format_id(memo.id)} {memo.content}")
+        template.header("BABEL MEMO", f"Memo saved{init_marker}")
 
+        memo_lines = [f"{self._cli.format_id(memo.id)} {memo.content}"]
         if memo.contexts:
-            print(f"  Contexts: {', '.join(memo.contexts)}")
+            memo_lines.append(f"Contexts: {', '.join(memo.contexts)}")
         else:
-            print(f"  Contexts: (global - applies everywhere)")
+            memo_lines.append("Contexts: (global - applies everywhere)")
+        template.section("MEMO", "\n".join(memo_lines))
 
         if memo.init:
-            print(f"\nThis will surface at session start via 'babel status'.")
+            template.section("INFO", "This will surface at session start via 'babel status'.")
         else:
-            print(f"\nThis will be surfaced in relevant contexts.")
-        print(f"Manage memos: babel memo --list")
+            template.section("INFO", "This will be surfaced in relevant contexts.")
 
-        # Succession hint (centralized)
-        from ..output import end_command
-        end_command("memo", {})
+        template.section("ACTION", "Manage memos: babel memo --list")
+        template.footer(f"{symbols.check_pass} Memo ready")
+        output = template.render(command="memo", context={"added": True, "init": memo.init})
+        print(output)
 
     def remove(self, memo_id: str):
         """
@@ -69,18 +73,26 @@ class MemoCommand(BaseCommand):
         # Get memo before removing (for display)
         memo = self._cli.memos.get(memo_id)
         if not memo:
-            print(f"\nMemo not found: {memo_id}")
+            template = OutputTemplate(symbols=symbols)
+            template.header("BABEL MEMO", "Not Found")
+            template.section("ERROR", f"Memo not found: {memo_id}")
+            output = template.render(command="memo", context={"error": True})
+            print(output)
             return
 
         if self._cli.memos.remove(memo_id):
-            print(f"\n{symbols.check_pass} Memo removed:")
-            print(f"  {self._cli.format_id(memo.id)} {memo.content}")
-
-            # Succession hint (centralized)
-            from ..output import end_command
-            end_command("memo", {})
+            template = OutputTemplate(symbols=symbols)
+            template.header("BABEL MEMO", "Memo removed")
+            template.section("REMOVED", f"{self._cli.format_id(memo.id)} {memo.content}")
+            template.footer(f"{symbols.check_pass} Memo deleted")
+            output = template.render(command="memo", context={"removed": True})
+            print(output)
         else:
-            print(f"\nFailed to remove memo: {memo_id}")
+            template = OutputTemplate(symbols=symbols)
+            template.header("BABEL MEMO", "Failed")
+            template.section("ERROR", f"Failed to remove memo: {memo_id}")
+            output = template.render(command="memo", context={"error": True})
+            print(output)
 
     def update(self, memo_id: str, content: Optional[str] = None,
                contexts: Optional[List[str]] = None):
@@ -95,18 +107,31 @@ class MemoCommand(BaseCommand):
         symbols = self.symbols
 
         if content is None and contexts is None:
-            print("\nNothing to update. Provide --content or --context.")
+            template = OutputTemplate(symbols=symbols)
+            template.header("BABEL MEMO", "Nothing to Update")
+            template.section("ERROR", "Nothing to update. Provide --content or --context.")
+            output = template.render(command="memo", context={"error": True})
+            print(output)
             return
 
         memo = self._cli.memos.update(memo_id, content, contexts)
 
         if memo:
-            print(f"\n{symbols.check_pass} Memo updated:")
-            print(f"  {self._cli.format_id(memo.id)} {memo.content}")
+            template = OutputTemplate(symbols=symbols)
+            template.header("BABEL MEMO", "Memo updated")
+            memo_lines = [f"{self._cli.format_id(memo.id)} {memo.content}"]
             if memo.contexts:
-                print(f"  Contexts: {', '.join(memo.contexts)}")
+                memo_lines.append(f"Contexts: {', '.join(memo.contexts)}")
+            template.section("UPDATED", "\n".join(memo_lines))
+            template.footer(f"{symbols.check_pass} Memo saved")
+            output = template.render(command="memo", context={"updated": True})
+            print(output)
         else:
-            print(f"\nMemo not found: {memo_id}")
+            template = OutputTemplate(symbols=symbols)
+            template.header("BABEL MEMO", "Not Found")
+            template.section("ERROR", f"Memo not found: {memo_id}")
+            output = template.render(command="memo", context={"error": True})
+            print(output)
 
     def list_memos(self, context: Optional[str] = None, init_only: bool = False):
         """
@@ -144,12 +169,14 @@ class MemoCommand(BaseCommand):
         print()
 
         for memo in memos:
-            content_display = truncate(memo.content, SUMMARY_LENGTH - 15)
+            content_display = generate_summary(memo.content)
             ctx_display = f"[{', '.join(memo.contexts)}]" if memo.contexts else "[global]"
             use_info = f"(used {memo.use_count}x)" if memo.use_count > 0 else ""
             init_marker = f"{symbols.purpose} INIT " if memo.init else ""
+            # P12: Time always shown
+            time_str = f" ({format_timestamp(memo.created)})" if memo.created else ""
 
-            safe_print(f"  {init_marker}{self._cli.format_id(memo.id)} {content_display}")
+            safe_print(f"  {init_marker}{self._cli.format_id(memo.id)} {content_display}{time_str}")
             print(f"           {ctx_display} {use_info}")
 
         print()
@@ -208,7 +235,7 @@ class MemoCommand(BaseCommand):
 
         print(f"\n{symbols.purpose} Active memos for [{', '.join(contexts)}]:")
         for memo in memos:
-            content_display = truncate(memo.content, SUMMARY_LENGTH)
+            content_display = generate_summary(memo.content)
             safe_print(f"  {symbols.arrow} {content_display}")
 
             # Increment use count
@@ -238,9 +265,11 @@ class MemoCommand(BaseCommand):
         if pending:
             print(f"{symbols.tension} Ready to promote ({len(pending)}):")
             for cand in pending:
-                content_display = truncate(cand.content, SUMMARY_LENGTH - 20)
+                content_display = generate_summary(cand.content)
                 ctx_display = f"[{', '.join(cand.contexts[:3])}]" if cand.contexts else ""
-                safe_print(f"  {self._cli.format_id(cand.id)} {content_display}")
+                # P12: Time always shown
+                time_str = f" ({format_timestamp(cand.first_seen)})" if cand.first_seen else ""
+                safe_print(f"  {self._cli.format_id(cand.id)} {content_display}{time_str}")
                 print(f"           Seen {cand.count}x in {len(cand.sessions)} session(s) {ctx_display}")
             print()
             print(f"  {symbols.arrow} Promote: babel memo --promote <id>")
@@ -253,8 +282,10 @@ class MemoCommand(BaseCommand):
             print(f"Tracking ({len(other)}):")
             for cand in other:
                 status = "(dismissed)" if cand.status == "dismissed" else ""
-                content_display = truncate(cand.content, SUMMARY_LENGTH - 20)
-                safe_print(f"  {self._cli.format_id(cand.id)} {content_display} {status}")
+                content_display = generate_summary(cand.content)
+                # P12: Time always shown
+                time_str = f" ({format_timestamp(cand.first_seen)})" if cand.first_seen else ""
+                safe_print(f"  {self._cli.format_id(cand.id)} {content_display}{time_str} {status}")
                 print(f"           Seen {cand.count}x")
 
     def add_candidate(self, content: str, contexts: Optional[List[str]] = None):
@@ -270,7 +301,7 @@ class MemoCommand(BaseCommand):
         # Check if we should suggest promotion
         if self._cli.memos.should_suggest_promotion(candidate):
             symbols = self.symbols
-            content_display = truncate(candidate.content, SUMMARY_LENGTH)
+            content_display = generate_summary(candidate.content)
             print(f"\n{symbols.purpose} I've noticed you repeat this often:")
             safe_print(f"  \"{content_display}\"")
             print(f"\n  Seen {candidate.count}x across {len(candidate.sessions)} session(s).")
@@ -350,10 +381,12 @@ class MemoCommand(BaseCommand):
         print()
 
         for cand in pending:
-            content_display = truncate(cand.content, SUMMARY_LENGTH - 10)
+            content_display = generate_summary(cand.content)
             ctx_display = f"[{', '.join(cand.contexts[:3])}]" if cand.contexts else ""
+            # P12: Time always shown
+            time_str = f" ({format_timestamp(cand.first_seen)})" if cand.first_seen else ""
 
-            safe_print(f"  {self._cli.format_id(cand.id)} \"{content_display}\"")
+            safe_print(f"  {self._cli.format_id(cand.id)} \"{content_display}\"{time_str}")
             print(f"           Seen {cand.count}x {ctx_display}")
             print()
 
@@ -377,7 +410,7 @@ class MemoCommand(BaseCommand):
             memo = self._cli.memos.promote(cand.id)
             if memo:
                 promoted += 1
-                safe_print(f"  {symbols.check_pass} {self._cli.format_id(memo.id)} {truncate(memo.content, 50)}")
+                safe_print(f"  {symbols.check_pass} {self._cli.format_id(memo.id)} {generate_summary(memo.content)}")
 
         print(f"\nPromoted {promoted} candidate(s) to memos.")
 
@@ -385,15 +418,23 @@ class MemoCommand(BaseCommand):
         """
         Show memo statistics.
         """
+        symbols = self.symbols
         stats = self._cli.memos.stats()
 
-        print("\nMemo Statistics:")
-        print(f"  Saved memos:        {stats['memos']}")
-        print(f"  Init memos:         {stats['init_memos']}")
-        print(f"  With contexts:      {stats['with_contexts']}")
-        print(f"  Total uses:         {stats['total_uses']}")
-        print(f"  Pending candidates: {stats['candidates']}")
-        print(f"  Ready to promote:   {stats['pending_suggestions']}")
+        template = OutputTemplate(symbols=symbols)
+        template.header("BABEL MEMO", "Memo Statistics")
+
+        stats_lines = [
+            f"Saved memos:        {stats['memos']}",
+            f"Init memos:         {stats['init_memos']}",
+            f"With contexts:      {stats['with_contexts']}",
+            f"Total uses:         {stats['total_uses']}",
+            f"Pending candidates: {stats['candidates']}",
+            f"Ready to promote:   {stats['pending_suggestions']}"
+        ]
+        template.section("STATISTICS", "\n".join(stats_lines))
+        output = template.render(command="memo", context={"stats": True})
+        print(output)
 
 
 # =============================================================================

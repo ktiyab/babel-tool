@@ -15,7 +15,7 @@ Known standards (adapted over time):
 import os
 from enum import Enum
 from pathlib import Path
-from typing import Optional, Tuple
+from typing import Tuple
 
 
 class IDEType(Enum):

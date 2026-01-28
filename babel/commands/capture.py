@@ -17,6 +17,7 @@ from ..core.events import (
 from ..core.scope import EventScope
 from ..tracking.ambiguity import detect_uncertainty
 from ..presentation.symbols import safe_print
+from ..presentation.template import OutputTemplate
 
 
 class CaptureCommand(BaseCommand):
@@ -86,7 +87,7 @@ class CaptureCommand(BaseCommand):
             batch_mode: Queue proposals for later review (HC2)
         """
         from ..core.domains import (
-            suggest_domain_for_capture, validate_domain, get_domain_description,
+            suggest_domain_for_capture, validate_domain,
             analyze_cross_domain
         )
 
@@ -110,8 +111,9 @@ class CaptureCommand(BaseCommand):
             suggested_domain = cross_domain.primary_domain or suggest_domain_for_capture(text)
 
         # Validate explicit domain
+        domain_warning = None
         if domain and not validate_domain(domain):
-            print(f"Warning: Unknown domain '{domain}'. Using anyway.")
+            domain_warning = f"Warning: Unknown domain '{domain}'. Using anyway."
 
         # Store raw capture with domain and uncertainty
         event = capture_conversation(
@@ -125,43 +127,64 @@ class CaptureCommand(BaseCommand):
         # Index into refs (O(1) lookup later)
         self.refs.index_event(event, self.vocabulary)
 
+        # Build capture confirmation output with OutputTemplate
         scope_marker = f"{symbols.shared} shared" if share else f"{symbols.local} local"
-        domain_note = ""
-        if domain:
-            domain_note = f" [{domain}]"
-        elif suggested_domain:
-            domain_note = f" [auto: {suggested_domain}]"
+        domain_display = domain if domain else (f"auto: {suggested_domain}" if suggested_domain else None)
 
-        # P6: Show uncertainty marker
-        uncertain_note = ""
+        template = OutputTemplate(symbols=symbols)
+        template.header("BABEL CAPTURE", "Intent Captured")
+        template.legend({
+            symbols.shared: "shared with team",
+            symbols.local: "local only",
+            symbols.evidence_only: "uncertain/provisional"
+        })
+
+        # STATUS section
+        status_parts = [f"Captured ({scope_marker})"]
+        if domain_display:
+            status_parts.append(f"Domain: {domain_display}")
         if uncertain:
-            uncertain_note = f" {symbols.evidence_only} UNCERTAIN"
+            status_parts.append(f"{symbols.evidence_only} UNCERTAIN")
+        if domain_warning:
+            status_parts.append(domain_warning)
+        template.section("STATUS", "\n".join(status_parts))
 
-        print(f"Captured ({scope_marker}){domain_note}{uncertain_note}.")
-
+        # UNCERTAINTY section (P10)
         if uncertain and uncertainty_reason:
-            print(f"  Uncertainty: {uncertainty_reason}")
+            template.section("UNCERTAINTY", uncertainty_reason)
 
-        # P10: Show cross-domain references if detected
+        # CROSS-DOMAIN section (P10)
         if cross_domain.has_cross_domain:
+            cross_lines = []
             cross_summary = cross_domain.summary()
             if cross_summary:
-                print(f"  {symbols.drift} Cross-domain: {cross_summary}")
+                cross_lines.append(f"{symbols.drift} {cross_summary}")
             if cross_domain.external_domains:
-                print(f"  (Borrowing from: {', '.join(cross_domain.external_domains)})")
+                cross_lines.append(f"Borrowing from: {', '.join(cross_domain.external_domains)}")
+            if cross_lines:
+                template.section("CROSS-DOMAIN", "\n".join(cross_lines))
 
+        # ACTIONS section
+        actions = []
         if not share:
-            print(f"  Share with: babel share {self._cli.codec.encode(event.id)}")
+            actions.append(f"Share with: babel share {self._cli.codec.encode(event.id)}")
+        if auto_extract and not self.extractor.is_available:
+            env_key = self.config.llm.remote.api_key_env
+            actions.append(f"(Using basic extraction -- set {env_key} for smarter analysis)")
+        if actions:
+            template.section("ACTIONS", "\n".join(actions))
 
-        if auto_extract:
-            if not self.extractor.is_available:
-                env_key = self.config.llm.api_key_env
-                print(f"  (Using basic extraction -- set {env_key} for smarter analysis)")
+        # Render capture confirmation (without succession if extracting)
+        if not auto_extract:
+            template.footer("Captured raw. Use: babel review")
+            output = template.render(command="capture", context={"raw": True})
+            print(output)
+        else:
+            # Print confirmation without succession (extract_and_confirm handles rest)
+            template.footer("Extracting artifacts...")
+            output = template.render()  # No command = no succession hint
+            print(output)
             self.extract_and_confirm(text, event.id, share=share, domain=domain or suggested_domain, batch_mode=batch_mode)
-
-        # Succession hint (centralized)
-        from ..output import end_command
-        end_command("capture", {})
 
     def extract_and_confirm(
         self,
@@ -186,31 +209,50 @@ class CaptureCommand(BaseCommand):
         # Get existing artifacts for context-aware extraction (prevents duplicates)
         existing_context = self._get_existing_artifacts()
         proposals = self.extractor.extract(text, source_id, existing_context=existing_context)
+        symbols = self.symbols
 
         if not proposals:
-            print("Nothing structured found. That's fine--raw capture is saved.")
+            template = OutputTemplate(symbols=symbols)
+            template.header("BABEL CAPTURE", "Extraction Complete")
+            template.section("STATUS", "Nothing structured found. That's fine--raw capture is saved.")
+            template.footer("Raw capture preserved")
+            output = template.render(command="capture", context={"no_proposals": True})
+            print(output)
             return
-
-        print(f"\nI found {len(proposals)} potential artifact(s):\n")
 
         # Batch mode: queue proposals for later review (HC2 compliant)
         if batch_mode:
+            template = OutputTemplate(symbols=symbols)
+            template.header("BABEL CAPTURE", f"Found {len(proposals)} Artifact(s)")
+            template.legend({
+                symbols.proposed: "queued for review",
+                symbols.check_pass: "accepted"
+            })
+
+            proposal_lines = []
             queued_count = 0
             for i, proposal in enumerate(proposals):
-                # Layer 2 (Encoding): Use safe_print for LLM-generated content
-                safe_print(f"--- {i+1}. {proposal.artifact_type.upper()} ---")
-                safe_print(self.extractor.format_for_confirmation(proposal))
+                # Build proposal display
+                proposal_lines.append(f"--- {i+1}. {proposal.artifact_type.upper()} ---")
+                proposal_lines.append(self.extractor.format_for_confirmation(proposal))
 
                 # Add domain to proposal content (P3)
                 if domain:
                     proposal.content['domain'] = domain
 
                 self._queue_proposal(proposal, share=share)
-                print("> queued for review\n")
+                proposal_lines.append(f"{symbols.proposed} queued for review")
+                proposal_lines.append("")
                 queued_count += 1
 
-            print(f"Queued {queued_count} proposal(s). Review with: babel review")
+            template.section("PROPOSALS", "\n".join(proposal_lines))
+            template.footer(f"Queued {queued_count} proposal(s). Review with: babel review")
+            output = template.render(command="capture", context={"batch": True, "queued": queued_count})
+            print(output)
             return
+
+        # Interactive mode: announce found proposals
+        print(f"\nI found {len(proposals)} potential artifact(s):\n")
 
         # Interactive mode: ask for confirmation (default)
         for i, proposal in enumerate(proposals):
@@ -319,16 +361,22 @@ class CaptureCommand(BaseCommand):
         # Resolve need_id (support prefix matching)
         resolved_id = self._resolve_need_id(need_id)
         if not resolved_id:
-            print(f"Error: No need found matching '{need_id}'")
-            print(f"  Use: babel list --filter <keyword> to find needs")
+            template = OutputTemplate(symbols=symbols)
+            template.header("BABEL CAPTURE", "Specification Error")
+            template.section("STATUS", f"No need found matching '{need_id}'")
+            template.section("ACTION", "Use: babel list --filter <keyword> to find needs")
+            template.footer("Specify a valid need ID")
+            output = template.render(command="capture", context={"spec_error": True})
+            print(output)
             return
 
         # Parse the specification text
         spec_data = self._parse_spec_text(spec_text)
 
+        # Track if objective was auto-inferred
+        objective_warning = None
         if not spec_data.get('objective'):
-            print(f"Warning: No OBJECTIVE found in specification.")
-            print(f"  Expected format: OBJECTIVE: <what this achieves>")
+            objective_warning = "No OBJECTIVE found. Expected format: OBJECTIVE: <what this achieves>"
             # Use first line as objective fallback
             first_line = spec_text.strip().split('\n')[0]
             spec_data['objective'] = first_line[:200]
@@ -350,24 +398,41 @@ class CaptureCommand(BaseCommand):
         # Index for retrieval
         self.refs.index_event(event, self.vocabulary)
 
-        print(f"Specification added to {self._cli.format_id(resolved_id)} ({symbols.shared} shared).")
-        print(f"  OBJECTIVE: {spec_data.get('objective', 'N/A')[:80]}...")
+        # Build success output with OutputTemplate
+        template = OutputTemplate(symbols=symbols)
+        template.header("BABEL CAPTURE", "Specification Added")
+        template.legend({
+            symbols.shared: "shared with team",
+            symbols.check_pass: "parsed"
+        })
 
-        # Show parsed structure
+        # STATUS section
+        status_line = f"Specification added to {self._cli.format_id(resolved_id)} ({symbols.shared} shared)"
+        if objective_warning:
+            status_line += f"\n{symbols.drift} Warning: {objective_warning}"
+        template.section("STATUS", status_line)
+
+        # OBJECTIVE section
+        template.section("OBJECTIVE", f"{spec_data.get('objective', 'N/A')[:80]}...")
+
+        # STRUCTURE section - show parsed counts
+        structure_lines = []
         if spec_data.get('add'):
-            print(f"  ADD: {len(spec_data['add'])} item(s)")
+            structure_lines.append(f"ADD: {len(spec_data['add'])} item(s)")
         if spec_data.get('modify'):
-            print(f"  MODIFY: {len(spec_data['modify'])} item(s)")
+            structure_lines.append(f"MODIFY: {len(spec_data['modify'])} item(s)")
         if spec_data.get('remove'):
-            print(f"  REMOVE: {len(spec_data['remove'])} item(s)")
+            structure_lines.append(f"REMOVE: {len(spec_data['remove'])} item(s)")
         if spec_data.get('preserve'):
-            print(f"  PRESERVE: {len(spec_data['preserve'])} item(s)")
+            structure_lines.append(f"PRESERVE: {len(spec_data['preserve'])} item(s)")
         if spec_data.get('related_files'):
-            print(f"  RELATED: {len(spec_data['related_files'])} file(s)")
+            structure_lines.append(f"RELATED: {len(spec_data['related_files'])} file(s)")
+        if structure_lines:
+            template.section("STRUCTURE", "\n".join(structure_lines))
 
-        # Succession hint
-        from ..output import end_command
-        end_command("capture_spec", {"need_id": resolved_id})
+        template.footer("Specification linked to need")
+        output = template.render(command="capture_spec", context={"need_id": resolved_id})
+        print(output)
 
     def _resolve_need_id(self, need_id: str) -> Optional[str]:
         """

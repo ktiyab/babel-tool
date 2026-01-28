@@ -894,7 +894,8 @@ def add_evidence(
             "content": content,
             "evidence_type": evidence_type,
             "author": author
-        }
+        },
+        parent_id=challenge_id  # Enable consistent ID display in history
     )
 
 
@@ -925,7 +926,8 @@ def resolve_challenge(
             "resolution": resolution,
             "evidence_summary": evidence_summary,
             "author": author
-        }
+        },
+        parent_id=challenge_id  # Enable consistent ID display in history
     )
 
 
@@ -955,7 +957,8 @@ def register_decision_for_validation(
             "decision_id": decision_id,
             "summary": summary,
             "author": author
-        }
+        },
+        parent_id=decision_id  # Enable consistent ID display in history
     )
 
 
@@ -983,7 +986,8 @@ def endorse_decision(
 
     return Event(
         type=EventType.DECISION_ENDORSED,
-        data=data
+        data=data,
+        parent_id=decision_id  # Enable consistent ID display in history
     )
 
 
@@ -1011,7 +1015,8 @@ def evidence_decision(
             "content": content,
             "evidence_type": evidence_type,
             "author": author
-        }
+        },
+        parent_id=decision_id  # Enable consistent ID display in history
     )
 
 
@@ -1076,7 +1081,8 @@ def resolve_question(
             "resolution": resolution,
             "outcome": outcome,
             "author": author
-        }
+        },
+        parent_id=question_id  # Enable consistent ID display in history
     )
 
 
@@ -1112,7 +1118,8 @@ def deprecate_artifact(
 
     return Event(
         type=EventType.ARTIFACT_DEPRECATED,
-        data=data
+        data=data,
+        parent_id=artifact_id  # Enable consistent ID display in history
     )
 
 

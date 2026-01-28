@@ -11,15 +11,16 @@ Handles 'why' queries with:
 
 import json
 import hashlib
-import re
-from pathlib import Path
 from typing import Optional, List, Set
 
 from ..commands.base import BaseCommand
 from ..core.commit_links import CommitLinkStore
 from ..core.events import EventType
 from ..core.symbols import CodeSymbolStore
+from ..core.tokenizer import tokenize_text
+from ..presentation.formatters import get_node_summary, generate_summary, format_timestamp
 from ..presentation.symbols import safe_print
+from ..presentation.template import OutputTemplate
 
 
 class WhyCommand(BaseCommand):
@@ -101,8 +102,14 @@ class WhyCommand(BaseCommand):
         symbols = self._gather_symbol_context(query)
 
         if not artifacts and not rejections and not symbols:
-            print(f"\nNo matches for \"{query}\".")
-            print("Try capturing more context about this topic.")
+            # Build template for no-matches case
+            template = OutputTemplate(symbols=self.symbols)
+            template.header("BABEL WHY", f"Query: \"{query}\"")
+            template.section("STATUS", f"No matches found for \"{query}\".")
+            template.section("SUGGESTION", "Try capturing more context about this topic:\n  babel capture \"<decision about this topic>\" --batch")
+            template.footer("No artifacts, rejections, or code symbols match this query")
+            output = template.render(command="why", context={"no_matches": True})
+            print(output)
             return
 
         # Try LLM synthesis if available
@@ -129,19 +136,20 @@ class WhyCommand(BaseCommand):
         """
         Tokenize text for keyword matching.
 
-        Handles punctuation, file extensions, compound terms.
+        Uses universal tokenizer for language-agnostic tokenization.
+        Handles camelCase, snake_case, kebab-case, PascalCase, etc.
+
         Examples:
             "ontology.py" -> {"ontology", "py"}
             "why-command" -> {"why", "command"}
             "babel_tool" -> {"babel", "tool"}
+            "getUserProfile" -> {"get", "user", "profile"}
+            "UserService" -> {"user", "service"}
 
         Returns:
             Set of lowercase tokens
         """
-        # Split on non-alphanumeric characters
-        tokens = re.split(r'[^a-zA-Z0-9]+', text.lower())
-        # Filter empty strings and single characters (noise)
-        return {t for t in tokens if len(t) > 1}
+        return tokenize_text(text)
 
     def _get_specs_for_artifact(self, artifact_id: str) -> List[dict]:
         """
@@ -270,7 +278,8 @@ class WhyCommand(BaseCommand):
         for rejection in rejection_events:
             proposal_id = rejection.data.get('proposal_id', '')
             reason = rejection.data.get('reason', 'No reason provided')
-            rejection_date = rejection.timestamp[:10] if rejection.timestamp else 'Unknown'
+            # P12: Time always shown
+            rejection_date = format_timestamp(rejection.timestamp) if rejection.timestamp else 'unknown'
 
             # Get original proposal
             original = proposed_by_id.get(proposal_id)
@@ -436,6 +445,7 @@ class WhyCommand(BaseCommand):
         specs = self._get_specs_for_artifact(artifact_id)
 
         # Collect relationship details for context
+        # Note: Use full summary (not digest) for LLM context - LLM needs complete information
         relationships = []
         for edge, target in outgoing:
             target_alias = self._cli.codec.encode(target.id)
@@ -443,7 +453,7 @@ class WhyCommand(BaseCommand):
                 'relation': edge.relation,
                 'target_id': target_alias,
                 'target_type': target.type,
-                'target_summary': target.content.get('summary', '')[:50]
+                'target_summary': get_node_summary(target)
             })
         for edge, source in incoming:
             source_alias = self._cli.codec.encode(source.id)
@@ -451,14 +461,14 @@ class WhyCommand(BaseCommand):
                 'relation': f"has_{edge.relation}",  # Reverse direction indicator
                 'target_id': source_alias,
                 'target_type': source.type,
-                'target_summary': source.content.get('summary', '')[:50]
+                'target_summary': get_node_summary(source)
             })
 
         return {
             'node': node,
             'short_id': short,
             'type': node.type,
-            'summary': node.content.get('summary', str(node.content)[:100]),
+            'summary': get_node_summary(node),  # Full summary for LLM context
             'domain': node.content.get('domain', ''),
             'score': score,
             'related_count': len(incoming) + len(outgoing),
@@ -469,7 +479,9 @@ class WhyCommand(BaseCommand):
             'match_type': match_type,
             'via_relation': via_relation,
             'via_artifact': via_artifact,
-            'relationships': relationships[:5]  # Limit to top 5 relationships
+            'relationships': relationships[:5],  # Limit to top 5 relationships
+            # P12: Temporal context
+            'created_at': node.created_at
         }
 
     def _synthesized(self, query: str, artifacts: list, rejections: list = None, code_symbols: list = None):
@@ -658,65 +670,102 @@ OUTPUT: Plain text only, no markdown. Length should match complexity - simple to
         symbols = self.symbols
         rejections = rejections or []
         code_symbols = code_symbols or []
-        print(f"\n{query.capitalize()}:\n")
 
-        for a in artifacts[:5]:
-            node = a['node']
-            short_id = a['short_id']
-            domain_tag = f" [{a['domain']}]" if a['domain'] else ""
+        # Build template
+        template = OutputTemplate(symbols=symbols)
+        template.header("BABEL WHY", f"Query: \"{query}\" (Fallback Mode)")
+        template.legend({
+            "C": "class",
+            "F": "function",
+            "M": "method",
+            symbols.deprecated: "deprecated",
+            symbols.tension: "challenged"
+        })
 
-            # Check deprecation status (access via cli)
-            dep_info = self._cli._is_deprecated(node.id)
-            dep_marker = f" {symbols.deprecated}" if dep_info else ""
+        # Build artifacts section
+        if artifacts:
+            artifact_lines = []
+            for a in artifacts[:5]:
+                node = a['node']
+                short_id = a['short_id']
+                domain_tag = f" [{a['domain']}]" if a['domain'] else ""
 
-            # Show ID for traceability
-            safe_print(f"  [{short_id}] {a['type'].capitalize()}: {a['summary'][:50]}{domain_tag}{dep_marker}")
+                # Check deprecation status (access via cli)
+                dep_info = self._cli._is_deprecated(node.id)
+                dep_marker = f" {symbols.deprecated}" if dep_info else ""
 
-            # Show how artifact was found (if via traversal)
-            if a.get('match_type') == 'traversal' and a.get('via_relation'):
-                print(f"    (via {a['via_relation']} from [{a['via_artifact']}])")
+                # P12: Time always shown
+                time_str = format_timestamp(a.get('created_at', ''))
 
-            # Show key relationships
-            for rel in a.get('relationships', [])[:2]:
-                print(f"    {symbols.arrow} {rel['relation']} [{rel['target_id']}]")
+                # Show ID and time for traceability
+                artifact_lines.append(f"[{short_id}] {time_str} {a['type'].capitalize()}: {a['summary'][:50]}{domain_tag}{dep_marker}")
 
-            if a['challenges'] > 0:
-                print(f"    {symbols.tension} {a['challenges']} open challenge(s)")
+                # Show how artifact was found (if via traversal)
+                if a.get('match_type') == 'traversal' and a.get('via_relation'):
+                    artifact_lines.append(f"  (via {a['via_relation']} from [{a['via_artifact']}])")
 
-            # Show linked specifications
-            for spec in a.get('specs', []):
-                if spec.get('objective'):
-                    print(f"    {symbols.arrow} Spec: {spec['objective'][:50]}...")
+                # Show key relationships
+                for rel in a.get('relationships', [])[:2]:
+                    artifact_lines.append(f"  {symbols.arrow} {rel['relation']} [{rel['target_id']}]")
 
-        # Show rejections (P8: Failure Metabolism)
+                if a['challenges'] > 0:
+                    artifact_lines.append(f"  {symbols.tension} {a['challenges']} open challenge(s)")
+
+                # Show linked specifications
+                for spec in a.get('specs', []):
+                    if spec.get('objective'):
+                        artifact_lines.append(f"  {symbols.arrow} Spec: {generate_summary(spec['objective'])}")
+
+                artifact_lines.append("")  # Blank line between artifacts
+
+            template.section(f"ARTIFACTS ({len(artifacts[:5])} found)", "\n".join(artifact_lines))
+
+        # Build rejections section (P8: Failure Metabolism)
         if rejections:
-            print(f"\nRejected proposals (P8: learn from failures):\n")
+            rejection_lines = []
             for r in rejections[:3]:
-                safe_print(f"  [{r['proposal_id']}] REJECTED {r['type'].upper()}: {r['summary'][:40]}...")
-                safe_print(f"    REASON: {r['reason'][:60]}...")
+                # P12: Time always shown
+                rejection_lines.append(f"[{r['proposal_id']}] {r['date']} REJECTED {r['type'].upper()}: {generate_summary(r['summary'])}")
+                rejection_lines.append(f"  REASON: {generate_summary(r['reason'])}")
+                rejection_lines.append("")
 
-        # Show code symbols (Phase 2: code locations)
+            template.section("REJECTED (P8: Learn from failures)", "\n".join(rejection_lines))
+
+        # Build code symbols section (Phase 2: code locations)
         if code_symbols:
-            print(f"\nRelated code:\n")
-            for s in code_symbols[:5]:
-                type_icon = {
-                    'class': 'C',
-                    'function': 'F',
-                    'method': 'M',
-                    'module': 'mod'
-                }.get(s['symbol_type'], '?')
+            symbol_lines = []
+            type_icons = {
+                'class': 'C', 'function': 'F', 'method': 'M', 'module': 'mod',
+                'interface': 'I', 'type': 'T', 'enum': 'E',
+                'container': 'H', 'id': '#', 'variable': 'V', 'animation': 'A',
+                'document': 'D', 'section': 'S', 'subsection': 's'
+            }
 
+            for s in code_symbols[:5]:
+                type_icon = type_icons.get(s['symbol_type'], '?')
                 location = f"{s['file_path']}:{s['line_start']}"
                 if s['line_end'] != s['line_start']:
                     location += f"-{s['line_end']}"
 
-                safe_print(f"  [{type_icon}] {s['name']} @ {location}")
+                symbol_lines.append(f"[{type_icon}] {s['name']} @ {location}")
                 if s['signature']:
-                    safe_print(f"      {s['signature'][:60]}")
+                    symbol_lines.append(f"    {s['signature'][:60]}")
                 if s['docstring']:
-                    safe_print(f"      \"{s['docstring'][:50]}...\"")
+                    symbol_lines.append(f"    \"{s['docstring'][:50]}...\"")
+                symbol_lines.append("")
 
-        print(f"\n  (Configure LLM for full explanation)")
+            template.section("CODE LOCATIONS", "\n".join(symbol_lines))
+
+        # Footer
+        source_count = len(artifacts[:5]) + len(rejections[:3]) + len(code_symbols[:5])
+        template.footer(f"{source_count} sources found — configure LLM for full synthesis")
+
+        output = template.render(command="why", context={
+            "found_artifacts": len(artifacts) > 0,
+            "found_rejections": len(rejections) > 0,
+            "found_symbols": len(code_symbols) > 0
+        })
+        print(output)
 
     # -------------------------------------------------------------------------
     # Commit-based Queries (P8: Evolution Traceable)
@@ -739,42 +788,64 @@ OUTPUT: Plain text only, no markdown. Length should match complexity - simple to
         git = GitIntegration()
 
         if not git.is_git_repo:
-            print("Not a git repository.")
+            template = OutputTemplate(symbols=symbols)
+            template.header("BABEL WHY", "Commit Query")
+            template.section("ERROR", "Not a git repository.")
+            template.footer("Run from within a git repository")
+            print(template.render())
             return
 
         commit_info = git.get_commit(commit_sha, include_diff=False)
         if not commit_info:
-            print(f"Commit not found: {commit_sha}")
+            template = OutputTemplate(symbols=symbols)
+            template.header("BABEL WHY", "Commit Query")
+            template.section("ERROR", f"Commit not found: {commit_sha}")
+            template.footer("Check commit SHA and try again")
+            print(template.render())
             return
 
         full_sha = commit_info.hash
         short_sha = full_sha[:8]
 
-        print(f"\nCommit [{short_sha}]:")
-        print(f"  \"{commit_info.message}\"")
+        # Build template
+        template = OutputTemplate(symbols=symbols)
+        template.header("BABEL WHY", "Commit Query (P8: Evolution Traceable)")
+        template.legend({
+            symbols.arrow: "linked to purpose"
+        })
+
+        # Commit info section
+        commit_lines = [
+            f"[{short_sha}] \"{commit_info.message}\""
+        ]
         if commit_info.author:
-            print(f"  by {commit_info.author}")
-        print()
+            commit_lines.append(f"  by {commit_info.author}")
+        template.section("COMMIT", "\n".join(commit_lines))
 
         # Get linked decisions
         commit_links = CommitLinkStore(self.babel_dir)
         links = commit_links.get_decisions_for_commit(full_sha)
 
         if not links:
-            print(f"No decisions linked to this commit.")
-            print(f"\nTo link a decision: babel link <decision_id> --to-commit {short_sha}")
+            template.section("LINKED DECISIONS", "No decisions linked to this commit.")
 
             # Try to suggest related decisions based on commit message keywords
             suggestions = self._suggest_decisions_for_commit(commit_info)
             if suggestions:
-                print(f"\n{symbols.llm_thinking} Possibly related decisions:")
+                suggestion_lines = [f"{symbols.llm_thinking} Possibly related decisions:"]
                 for s in suggestions[:3]:
-                    safe_print(f"  [{s['short_id']}] {s['summary'][:50]}")
-                print(f"\nLink with: babel link <id> --to-commit {short_sha}")
+                    suggestion_lines.append(f"  [{s['short_id']}] {s['summary'][:50]}")
+                suggestion_lines.append("")
+                suggestion_lines.append(f"Link with: babel link <id> --to-commit {short_sha}")
+                template.section("SUGGESTIONS", "\n".join(suggestion_lines))
+
+            template.footer(f"To link a decision: babel link <decision_id> --to-commit {short_sha}")
+            output = template.render(command="why", context={"commit_query": True, "found_links": False})
+            print(output)
             return
 
-        print(f"Linked decisions ({len(links)}):\n")
-
+        # Build linked decisions section
+        decision_lines = []
         for link in links:
             # Get decision details from graph
             decision_node = self._find_decision_node(link.decision_id)
@@ -783,25 +854,28 @@ OUTPUT: Plain text only, no markdown. Length should match complexity - simple to
                 decision_summary = decision_node.content.get('summary', '')
                 decision_type = decision_node.type
 
-                safe_print(f"  {self._cli.format_id(link.decision_id)} {decision_type.upper()}")
-                safe_print(f"    \"{decision_summary}\"")
+                decision_lines.append(f"{self._cli.format_id(link.decision_id)} {decision_type.upper()}")
+                decision_lines.append(f"  \"{decision_summary}\"")
 
                 # Show why this decision was made (purpose link)
                 incoming = self.graph.get_incoming(decision_node.id)
                 for edge, source_node in incoming:
                     if source_node.type == 'purpose':
-                        purpose_summary = source_node.content.get('summary', source_node.content.get('purpose', ''))[:50]
-                        print(f"    {symbols.arrow} Purpose: \"{purpose_summary}\"")
+                        purpose_summary = generate_summary(get_node_summary(source_node))
+                        decision_lines.append(f"  {symbols.arrow} Purpose: \"{purpose_summary}\"")
                         break
             else:
-                print(f"  {self._cli.format_id(link.decision_id)} (decision not found in graph)")
+                decision_lines.append(f"{self._cli.format_id(link.decision_id)} (decision not found in graph)")
 
-            print(f"    Linked by: {link.linked_by}")
-            print()
+            decision_lines.append(f"  Linked by: {link.linked_by}")
+            decision_lines.append("")
 
-        # Succession hint
-        from ..output import end_command
-        end_command("why", {"commit_query": True, "found_links": len(links) > 0})
+        template.section(f"LINKED DECISIONS ({len(links)})", "\n".join(decision_lines))
+
+        # Footer
+        template.footer(f"{len(links)} decision(s) linked to this commit")
+        output = template.render(command="why", context={"commit_query": True, "found_links": True})
+        print(output)
 
     def _find_decision_node(self, decision_id: str):
         """Find a decision node by ID (supports prefix matching)."""

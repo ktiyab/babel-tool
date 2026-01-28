@@ -2,7 +2,7 @@
 Tests for ListCommand — Graph-aware artifact discovery (Redesign #6)
 
 Tests for the babel list command including:
-- Helper functions (_get_summary)
+- Helper functions (get_node_summary from formatters.py)
 - Overview mode (counts by type)
 - Type listing (artifacts of specific type)
 - Graph traversal (from artifact)
@@ -12,15 +12,14 @@ Note: ID formatting is now handled by centralized IDCodec (format_id/codec.encod
 """
 
 import pytest
-from io import StringIO
-from unittest.mock import patch
 
 from babel.core.events import EventStore, declare_purpose, confirm_artifact
 from babel.core.graph import GraphStore, Node, Edge
 from babel.config import Config
 from babel.commands.list_cmd import (
-    ListCommand, _get_summary, ARTIFACT_TYPES, DEFAULT_LIMIT
+    ListCommand, ARTIFACT_TYPES, DEFAULT_LIMIT
 )
+from babel.presentation.formatters import get_node_summary
 
 
 # =============================================================================
@@ -117,7 +116,7 @@ def project_with_links(project_with_artifacts):
 
 
 class TestGetSummary:
-    """Test _get_summary helper function."""
+    """Test get_node_summary helper function."""
 
     def test_extracts_summary_field(self):
         """Extracts summary from content."""
@@ -127,7 +126,7 @@ class TestGetSummary:
             content={"summary": "Use SQLite for storage"},
             event_id=None
         )
-        assert _get_summary(node) == "Use SQLite for storage"
+        assert get_node_summary(node) == "Use SQLite for storage"
 
     def test_extracts_purpose_field(self):
         """Falls back to purpose field."""
@@ -137,7 +136,7 @@ class TestGetSummary:
             content={"purpose": "Build intent preservation tool"},
             event_id=None
         )
-        assert _get_summary(node) == "Build intent preservation tool"
+        assert get_node_summary(node) == "Build intent preservation tool"
 
     def test_extracts_what_field(self):
         """Falls back to what field."""
@@ -147,7 +146,7 @@ class TestGetSummary:
             content={"what": "SQLite database"},
             event_id=None
         )
-        assert _get_summary(node) == "SQLite database"
+        assert get_node_summary(node) == "SQLite database"
 
     def test_extracts_from_proposed_dict(self):
         """Extracts summary from nested proposed dict."""
@@ -161,7 +160,7 @@ class TestGetSummary:
             },
             event_id=None
         )
-        assert _get_summary(node) == "Add caching layer"
+        assert get_node_summary(node) == "Add caching layer"
 
     def test_extracts_what_from_proposed(self):
         """Extracts what from nested proposed dict."""
@@ -175,7 +174,7 @@ class TestGetSummary:
             },
             event_id=None
         )
-        assert _get_summary(node) == "Redis cache"
+        assert get_node_summary(node) == "Redis cache"
 
     def test_extracts_from_detail_dict(self):
         """Extracts what from nested detail dict."""
@@ -189,7 +188,7 @@ class TestGetSummary:
             },
             event_id=None
         )
-        assert _get_summary(node) == "PostgreSQL database"
+        assert get_node_summary(node) == "PostgreSQL database"
 
     def test_extracts_goal_from_detail(self):
         """Extracts goal from nested detail dict."""
@@ -203,7 +202,7 @@ class TestGetSummary:
             },
             event_id=None
         )
-        assert _get_summary(node) == "Improve performance"
+        assert get_node_summary(node) == "Improve performance"
 
     def test_fallback_to_str_content(self):
         """Falls back to string representation of content."""
@@ -213,7 +212,7 @@ class TestGetSummary:
             content={"unknown_field": "some value"},
             event_id=None
         )
-        result = _get_summary(node)
+        result = get_node_summary(node)
         assert "unknown_field" in result or "some value" in result
 
     def test_priority_order(self):
@@ -228,7 +227,7 @@ class TestGetSummary:
             },
             event_id=None
         )
-        assert _get_summary(node) == "Primary summary"
+        assert get_node_summary(node) == "Primary summary"
 
 
 # =============================================================================
@@ -466,6 +465,8 @@ class TestListFrom:
         real_codec = IDCodec()
         cli.resolver = real_resolver
         cli.codec = real_codec
+        # resolve_id should decode alias codes or pass through raw IDs
+        cli.resolve_id = lambda x: real_codec.decode(x) if real_codec.is_short_code(x) else x
         cmd = ListCommand(cli)
 
         cmd.list_from("nonexistent_xyz123")
@@ -478,7 +479,7 @@ class TestListFrom:
         events, graph, config, tmp_path = project_with_artifacts
 
         from unittest.mock import MagicMock
-        from babel.core.resolver import IDResolver, ResolveResult, ResolveStatus
+        from babel.core.resolver import ResolveResult, ResolveStatus
 
         cli = MagicMock()
         cli.graph = graph

@@ -23,7 +23,7 @@ Code space: 26^4 = 456,976 combinations (sufficient for any project)
 """
 
 import re
-from typing import Optional, List
+from typing import List
 
 import xxhash
 
@@ -139,21 +139,18 @@ class IDCodec:
 
         Handles:
         - Full event IDs: "c4dded21" → "c4dded21"
-        - Type-prefixed: "decision_3b152510..." → "3b152510"
+        - Type-prefixed: "decision_3b152510..." → "decision_3b15" (keeps prefix)
         - Long hashes: "3b15251098c469f3" → "3b152510"
+
+        Note: Type prefix is PRESERVED to avoid cross-type collisions.
+        Different artifact types with same underlying hash get different codes.
         """
         if not full_id:
             return full_id
 
-        # Strip type prefix if present
-        for prefix in ('decision_', 'purpose_', 'constraint_', 'principle_',
-                       'requirement_', 'tension_', 'm_', 'c_'):
-            if full_id.startswith(prefix):
-                full_id = full_id[len(prefix):]
-                break
-
-        # Take first 8 chars (standard display length)
-        return full_id[:8] if len(full_id) > 8 else full_id
+        # Take first 16 chars to include type prefix in hash computation
+        # This ensures decision_abc and constraint_abc produce different codes
+        return full_id[:16] if len(full_id) > 16 else full_id
 
     def _hash_to_code(self, normalized_id: str) -> str:
         """

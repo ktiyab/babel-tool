@@ -16,13 +16,12 @@ Compliance:
     - Full reconstruction always possible
 """
 
-from pathlib import Path
-from typing import Optional, List, Dict, Any, Union, TYPE_CHECKING
+from typing import Optional, List, Dict, Any, TYPE_CHECKING
 from dataclasses import dataclass
 
-from .events import Event, EventType, DualEventStore
+from .events import Event, DualEventStore
 from .refs import RefStore
-from .horizon import ArtifactDigest, EventDigest, estimate_tokens
+from .horizon import estimate_tokens
 
 if TYPE_CHECKING:
     from .graph import GraphStore, Node

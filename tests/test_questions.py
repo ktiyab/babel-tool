@@ -13,8 +13,7 @@ Aligns with:
 """
 
 import pytest
-from unittest.mock import Mock, patch, MagicMock
-from pathlib import Path
+from unittest.mock import Mock, patch
 
 from babel.commands.questions import QuestionsCommand
 from tests.factories import BabelTestFactory
@@ -57,11 +56,13 @@ def questions_command(babel_factory):
 class MockQuestion:
     """Mock question object for testing."""
     def __init__(self, qid, content, domain=None, context=None, status="open"):
+        from datetime import datetime, timezone
         self.id = qid
         self.content = content
         self.domain = domain
         self.context = context
         self.status = status
+        self.created_at = datetime.now(timezone.utc)  # P12: Time always shown
 
 
 # =============================================================================
@@ -328,11 +329,11 @@ class TestResolveQuestion:
         cmd._cli.resolve_id = Mock(return_value="q_remaining")
         cmd._cli.questions.count_open.return_value = 2  # 2 remaining
 
-        with patch('babel.output.end_command') as mock_end:
-            cmd.resolve_question("q_remaining", "Done")
+        cmd.resolve_question("q_remaining", "Done")
 
-            # Verify end_command called with remaining info
-            mock_end.assert_called_once()
+        # Verify output shows remaining count
+        captured = capsys.readouterr()
+        assert "2 question(s) remaining" in captured.out
 
     def test_handles_resolve_failure(self, questions_command, capsys):
         """Handles failure from questions.resolve."""
@@ -386,24 +387,25 @@ class TestQuestionsOutputSpec:
         assert "status" in result.data[0]
 
     def test_truncates_long_content(self, questions_command):
-        """Truncates long content by default."""
+        """Truncates long content by default using SUMMARY_LENGTH."""
         cmd, factory = questions_command
 
-        long_content = "A" * 100
+        # Content longer than SUMMARY_LENGTH (120) to trigger truncation
+        long_content = "A" * 200
         questions = [MockQuestion("q1", long_content, status="open")]
         cmd._cli.questions.get_open_questions.return_value = questions
         cmd._cli.questions.stats.return_value = {"open": 1, "resolved": 0}
 
         result = cmd._questions_as_output(full=False)
 
-        # Should be truncated to 50 chars
-        assert len(result.data[0]["question"]) <= 50
+        # Should be truncated to SUMMARY_LENGTH (120) or less via generate_summary
+        assert len(result.data[0]["question"]) <= 120
 
     def test_full_mode_no_truncation(self, questions_command):
         """Full mode shows complete content."""
         cmd, factory = questions_command
 
-        long_content = "A" * 100
+        long_content = "A" * 200
         questions = [MockQuestion("q1", long_content, status="open")]
         cmd._cli.questions.get_open_questions.return_value = questions
         cmd._cli.questions.stats.return_value = {"open": 1, "resolved": 0}
@@ -411,7 +413,7 @@ class TestQuestionsOutputSpec:
         result = cmd._questions_as_output(full=True)
 
         # Should NOT be truncated
-        assert len(result.data[0]["question"]) == 100
+        assert len(result.data[0]["question"]) == 200
 
     def test_shows_resolved_count_in_title(self, questions_command):
         """Shows resolved count in title when present."""

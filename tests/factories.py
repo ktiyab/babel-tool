@@ -387,6 +387,17 @@ class BabelTestFactory:
         # Real format_id method
         cli.format_id = lambda node_id: f"[{self.codec.encode(node_id)}]"
 
+        # Real resolve_id method (passthrough - decodes alias codes, returns raw IDs unchanged)
+        # This is important for commands that call resolve_id before other operations
+        # Signature: resolve_id(query, candidates=None, entity_type="item")
+        def _resolve_id(query, candidates=None, entity_type="item"):
+            if candidates is None:
+                # Simple passthrough mode - decode alias or return as-is
+                return self.codec.decode(query) if self.codec.is_short_code(query) else query
+            # With candidates, return None (tests should override if they need matching)
+            return None
+        cli.resolve_id = _resolve_id
+
         # Mock resolver (can be overridden per test)
         cli.resolver = Mock()
 

@@ -12,10 +12,12 @@ import json
 from typing import Optional
 
 from ..commands.base import BaseCommand
-from ..tracking.tensions import format_challenge, format_tensions_summary
+from ..tracking.tensions import format_challenge
 from ..tracking.ambiguity import check_premature_resolution
 from ..core.domains import suggest_domain_for_capture
 from ..core.events import classify_evolution
+from ..presentation.formatters import get_node_summary, generate_summary, format_timestamp
+from ..presentation.template import OutputTemplate
 
 
 class TensionsCommand(BaseCommand):
@@ -38,13 +40,16 @@ class TensionsCommand(BaseCommand):
         Challenge a decision with fuzzy ID matching.
 
         Args:
-            target_id: ID, prefix, or keyword to find decision
+            target_id: ID (alias code or prefix) to find decision
             reason: Why you disagree
             hypothesis: Testable alternative (optional)
             test: How to test the hypothesis (optional)
             domain: Expertise domain
         """
         symbols = self.symbols
+
+        # Resolve alias code to raw ID (counterpart to format_id for output)
+        target_id = self._cli.resolve_id(target_id)
 
         # Resolve target using fuzzy matching (via CLI)
         target_node = self._cli._resolve_node(target_id, type_label="decision")
@@ -54,7 +59,7 @@ class TensionsCommand(BaseCommand):
 
         # Auto-suggest hypothesis if not provided
         if not hypothesis and self.extractor.is_available:
-            print(f"\nChallenging: {target_node.content.get('summary', '')[:60]}")
+            print(f"\nChallenging: {generate_summary(get_node_summary(target_node))}")
             print(f"Reason: {reason}")
             print("\nThis could be tested. Propose a hypothesis?")
 
@@ -111,11 +116,14 @@ class TensionsCommand(BaseCommand):
         Add evidence to an open challenge (P4).
 
         Args:
-            challenge_id: Challenge ID (or prefix)
+            challenge_id: Challenge ID (alias code or prefix)
             content: The evidence
             evidence_type: observation | benchmark | user_feedback | other
         """
         symbols = self.symbols
+
+        # Resolve alias code to raw ID (counterpart to format_id for output)
+        challenge_id = self._cli.resolve_id(challenge_id)
 
         # Find challenge
         challenge = self._find_challenge_by_id(challenge_id)
@@ -126,7 +134,7 @@ class TensionsCommand(BaseCommand):
             if open_challenges:
                 print("\nOpen challenges:")
                 for c in open_challenges[:5]:
-                    print(f"  {self._cli.codec.encode(c.id)} | {c.reason[:40]}")
+                    print(f"  {self._cli.codec.encode(c.id)} | {generate_summary(c.reason)}")
             return
 
         if challenge.status == "resolved":
@@ -144,7 +152,7 @@ class TensionsCommand(BaseCommand):
             challenge_code = self._cli.codec.encode(challenge.id)
             print(f"Evidence added to {self._cli.format_id(challenge.id)} ({evidence_count} total)")
             print(f"  Type: {evidence_type}")
-            print(f"  Content: {content[:60]}...")
+            print(f"  Content: {generate_summary(content)}")
 
             if challenge.hypothesis:
                 print(f"\n{symbols.arrow} When ready: babel resolve {challenge_code} --outcome confirmed|revised|synthesized")
@@ -167,13 +175,16 @@ class TensionsCommand(BaseCommand):
         Resolve a challenge (P4: requires evidence, not authority).
 
         Args:
-            challenge_id: Challenge ID (or prefix)
+            challenge_id: Challenge ID (alias code or prefix)
             outcome: confirmed | revised | synthesized | uncertain
             resolution: What was decided (prompted if not provided)
             evidence_summary: Summary of evidence
             force: Skip premature resolution warning (P10)
         """
         symbols = self.symbols
+
+        # Resolve alias code to raw ID (counterpart to format_id for output)
+        challenge_id = self._cli.resolve_id(challenge_id)
 
         # Find challenge
         challenge = self._find_challenge_by_id(challenge_id)
@@ -302,30 +313,81 @@ class TensionsCommand(BaseCommand):
         if output_format:
             return self._tensions_as_output(verbose, full)
 
-        # Original behavior: print directly
-        print(format_tensions_summary(self.tensions, full=full))
+        symbols = self.symbols
+        stats = self.tensions.stats()
+        open_challenges = self.tensions.get_open_challenges()
+        has_open = stats["open"] > 0
 
-        if verbose:
-            open_challenges = self.tensions.get_open_challenges()
-            if open_challenges:
-                print("\n" + "-" * 50)
+        # Build template
+        template = OutputTemplate(symbols=symbols, full=full)
+        template.header("BABEL TENSIONS", "P4: Disagreement Tracking")
+        template.legend({
+            symbols.tension: "open",
+            symbols.check_pass: "resolved",
+            "◐": "untested hypothesis"
+        })
+
+        # Open tensions section
+        if has_open:
+            lines = []
+            for challenge in open_challenges[:10]:  # Limit display
+                hypothesis_note = ""
+                if challenge.hypothesis:
+                    status = "untested" if not challenge.evidence else f"{len(challenge.evidence)} evidence"
+                    hypothesis_note = f" (◐ {status})"
+
+                time_str = format_timestamp(challenge.created_at)
+                lines.append(f"{symbols.tension} [{self._cli.codec.encode(challenge.id)}] {time_str}")
+                lines.append(f"    Against: {challenge.parent_type} {self._cli.format_id(challenge.parent_id)}")
+                lines.append(f"    Reason: {generate_summary(challenge.reason, full=full)}{hypothesis_note}")
+
+            if len(open_challenges) > 10:
+                lines.append(f"\n  ({len(open_challenges) - 10} more tensions not shown)")
+
+            template.section("OPEN TENSIONS", "\n".join(lines))
+
+            # Verbose: show full challenge details
+            if verbose:
+                details = []
                 for challenge in open_challenges:
-                    print()
-                    print(format_challenge(challenge, verbose=True, full=full))
+                    details.append(format_challenge(challenge, verbose=True, full=full))
+                template.section("CHALLENGE DETAILS", "\n\n".join(details))
+        else:
+            template.section("STATUS", "No open tensions.")
 
-        # Succession hint (centralized)
-        from ..output import end_command
-        has_open = self.tensions.count_open() > 0
-        end_command("tensions", {"has_tensions": has_open, "no_tensions": not has_open})
+        # Resolved summary
+        if stats["resolved"] > 0:
+            outcomes = stats.get("outcomes", {})
+            resolved_parts = []
+            resolved_parts.append(f"Resolved: {stats['resolved']}")
+            if outcomes:
+                breakdown = ", ".join(f"{k}: {v}" for k, v in outcomes.items() if v > 0)
+                if breakdown:
+                    resolved_parts.append(f"  ({breakdown})")
+            template.section("RESOLVED", "\n".join(resolved_parts))
 
-        # Option 3: Contextual P10 hint when no tensions AND no questions
+        # P10 contextual hint when no tensions AND no questions
+        p10_hint = ""
         if not has_open:
             questions_count = self.questions.count_open() + len(self.questions.get_resolved_questions())
             decisions_count = len(self.graph.get_nodes_by_type('decision'))
             if questions_count == 0 and decisions_count > 10:
-                symbols = self.symbols
-                print(f"\n{symbols.check_warn} P10: {decisions_count} decisions but no questions captured.")
-                print(f"  Consider: babel question \"...\" to capture uncertainties.")
+                p10_hint = f"\n{symbols.check_warn} P10: {decisions_count} decisions but no questions captured.\n  Consider: babel question \"...\" to capture uncertainties."
+
+        # Footer summary
+        summary = f"{stats['open']} open | {stats['resolved']} resolved"
+        template.footer(summary)
+
+        # Render with succession hints
+        output = template.render(
+            command="tensions",
+            context={"has_tensions": has_open, "no_tensions": not has_open}
+        )
+        print(output)
+
+        # P10 hint after main output (not in template to preserve exact format)
+        if p10_hint:
+            print(p10_hint)
 
     def _tensions_as_output(self, verbose: bool = False, full: bool = False):
         """Return tensions data as OutputSpec for rendering."""
@@ -338,7 +400,7 @@ class TensionsCommand(BaseCommand):
         for challenge in open_challenges:
             # Get target info
             target_node = self._cli._find_node_by_id(challenge.target_id) if hasattr(self, '_cli') else None
-            target_summary = target_node.content.get('summary', '')[:30] if target_node else self._cli.codec.encode(challenge.target_id)
+            target_summary = generate_summary(get_node_summary(target_node)) if target_node else self._cli.codec.encode(challenge.target_id)
 
             # Evidence status
             evidence_count = len(challenge.evidence) if challenge.evidence else 0
@@ -346,9 +408,10 @@ class TensionsCommand(BaseCommand):
 
             rows.append({
                 "id": self._cli.codec.encode(challenge.id),
+                "time": format_timestamp(challenge.created_at),  # P12: Time always shown
                 "target": target_summary,
                 "status": challenge.status,
-                "reason": challenge.reason[:40] if challenge.reason else "",
+                "reason": generate_summary(challenge.reason) if challenge.reason else "",
                 "evidence": hypothesis_status
             })
 
@@ -359,8 +422,8 @@ class TensionsCommand(BaseCommand):
         return OutputSpec(
             data=rows,
             shape="table",
-            columns=["ID", "Target", "Status", "Reason", "Evidence"],
-            column_keys=["id", "target", "status", "reason", "evidence"],
+            columns=["ID", "Time", "Target", "Status", "Reason", "Evidence"],
+            column_keys=["id", "time", "target", "status", "reason", "evidence"],
             title=title,
             empty_message="No open tensions. Project is in agreement."
         )

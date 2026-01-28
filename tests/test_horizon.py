@@ -5,15 +5,14 @@ Tests event horizon, artifact digests, and conflict detection.
 """
 
 import pytest
-from datetime import datetime, timezone, timedelta
 
 from babel.core.events import EventStore, EventType, declare_purpose, confirm_artifact
-from babel.core.graph import GraphStore, Node
+from babel.core.graph import GraphStore
 from babel.core.horizon import (
     EventHorizon, DigestBuilder, ArtifactDigest, CoherenceContext,
-    EventDigest, HorizonSnapshot,
+    EventDigest,
     _extract_keywords, _keywords_conflict, estimate_tokens,
-    DEFAULT_HORIZON_DAYS, ARTIFACT_DIGEST_LENGTH
+    ARTIFACT_DIGEST_LENGTH,
 )
 
 

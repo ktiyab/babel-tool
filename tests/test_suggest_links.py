@@ -439,7 +439,7 @@ class TestHumanAuthority:
             with patch('babel.commands.suggest_links.GitIntegration') as mock_git_class:
                 mock_git = Mock()
                 mock_git.is_git_repo = True
-                mock_git._run_git.return_value = "abc123|Implement SQLite storage\n"
+                mock_git._run_git.return_value = "abc123|2026-01-28T10:00:00Z|Implement SQLite storage\n"
                 mock_git_class.return_value = mock_git
 
                 with patch('babel.output.end_command'):
@@ -471,7 +471,7 @@ class TestHumanAuthority:
             with patch('babel.commands.suggest_links.GitIntegration') as mock_git_class:
                 mock_git = Mock()
                 mock_git.is_git_repo = True
-                mock_git._run_git.return_value = "abc123|Implement SQLite storage\n"
+                mock_git._run_git.return_value = "abc123|2026-01-28T10:00:00Z|Implement SQLite storage\n"
                 mock_git_class.return_value = mock_git
 
                 with patch('babel.output.end_command'):
@@ -528,7 +528,7 @@ class TestEdgeCases:
             with patch('babel.commands.suggest_links.GitIntegration') as mock_git_class:
                 mock_git = Mock()
                 mock_git.is_git_repo = True
-                mock_git._run_git.return_value = "abc123|Some commit\n"
+                mock_git._run_git.return_value = "abc123|2026-01-28T10:00:00Z|Some commit\n"
                 mock_git_class.return_value = mock_git
 
                 suggest_command.suggest_links()
@@ -547,7 +547,7 @@ class TestEdgeCases:
             with patch('babel.commands.suggest_links.GitIntegration') as mock_git_class:
                 mock_git = Mock()
                 mock_git.is_git_repo = True
-                mock_git._run_git.return_value = "abc123|Already linked commit\n"
+                mock_git._run_git.return_value = "abc123|2026-01-28T10:00:00Z|Already linked commit\n"
                 mock_git_class.return_value = mock_git
 
                 suggest_command.suggest_links()

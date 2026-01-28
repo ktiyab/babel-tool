@@ -11,7 +11,8 @@ from typing import Optional
 
 from ..commands.base import BaseCommand
 from ..tracking.validation import ValidationStatus, format_validation_status, format_validation_summary
-from ..presentation.symbols import truncate, SUMMARY_LENGTH
+from ..presentation.formatters import get_node_summary, generate_summary, format_timestamp
+from ..presentation.template import OutputTemplate
 
 
 class ValidationCommand(BaseCommand):
@@ -28,10 +29,13 @@ class ValidationCommand(BaseCommand):
         Endorse a decision with fuzzy ID matching.
 
         Args:
-            decision_id: ID, prefix, or keyword to find decision
+            decision_id: ID (alias code or prefix) to find decision
             comment: Optional comment on why endorsing
         """
         symbols = self.symbols
+
+        # Resolve alias code to raw ID (counterpart to format_id for output)
+        decision_id = self._cli.resolve_id(decision_id)
 
         # Resolve target using fuzzy matching (via CLI)
         target_node = self._cli._resolve_node(decision_id, artifact_type='decision', type_label="decision")
@@ -44,30 +48,44 @@ class ValidationCommand(BaseCommand):
             comment=comment
         )
 
+        # Build template
+        template = OutputTemplate(symbols=symbols)
+        template.header("BABEL ENDORSE", "P5: Dual-Test Truth — Consensus")
+        template.legend({
+            symbols.validated: "validated (both consensus + evidence)",
+            symbols.consensus_only: "consensus only",
+            symbols.evidence_only: "evidence only",
+            symbols.proposed: "proposed"
+        })
+
         if success:
             # Get updated validation
             updated = self.validation.get_validation(target_node.id)
 
             # Show validation progress
             consensus_needed = 2  # Default threshold
-            evidence_needed = 1
-
-            print(f"\nEndorsement added.")
-            print(f"\n  Consensus: {updated.endorsement_count} of {consensus_needed}{' needed' if updated.endorsement_count < consensus_needed else ''}")
-            print(f"  Evidence: {updated.evidence_count}{' (none yet)' if updated.evidence_count == 0 else ''}")
-
             alias = self._cli.codec.encode(target_node.id)
+
+            progress_lines = [
+                "Endorsement added.",
+                "",
+                f"  Consensus: {updated.endorsement_count} of {consensus_needed}{' needed' if updated.endorsement_count < consensus_needed else ''}",
+                f"  Evidence: {updated.evidence_count}{' (none yet)' if updated.evidence_count == 0 else ''}"
+            ]
+            template.section("PROGRESS", "\n".join(progress_lines))
+
             if updated.status == ValidationStatus.VALIDATED:
-                print(f"\n  Status: Validated")
-                print(f"  This decision now has both team consensus and evidence.")
+                template.footer("Status: Validated — both team consensus and evidence")
             elif updated.status == ValidationStatus.CONSENSUS:
-                print(f"\n  Status: Needs evidence")
-                print(f"  {symbols.arrow} babel evidence-decision {alias} \"observed...\"")
+                template.footer(f"Status: Needs evidence → babel evidence-decision {alias} \"observed...\"")
             else:
-                print(f"\n  Status: Needs more consensus")
-                print(f"  {symbols.arrow} Ask a teammate: babel endorse {alias}")
+                template.footer(f"Status: Needs more consensus → Ask a teammate: babel endorse {alias}")
         else:
-            print(f"Already endorsed by you.")
+            template.section("STATUS", "Already endorsed by you.")
+            template.footer("No action needed")
+
+        output = template.render(command="endorse", context={})
+        print(output)
 
     def evidence_decision(
         self,
@@ -79,11 +97,14 @@ class ValidationCommand(BaseCommand):
         Add evidence to a decision with fuzzy ID matching.
 
         Args:
-            decision_id: ID, prefix, or keyword to find decision
+            decision_id: ID (alias code or prefix) to find decision
             content: The evidence
             evidence_type: observation | benchmark | user_feedback | outcome | other
         """
         symbols = self.symbols
+
+        # Resolve alias code to raw ID (counterpart to format_id for output)
+        decision_id = self._cli.resolve_id(decision_id)
 
         # Resolve target using fuzzy matching (via CLI)
         target_node = self._cli._resolve_node(decision_id, artifact_type='decision', type_label="decision")
@@ -97,30 +118,45 @@ class ValidationCommand(BaseCommand):
             evidence_type=evidence_type
         )
 
+        # Build template
+        template = OutputTemplate(symbols=symbols)
+        template.header("BABEL EVIDENCE", "P5: Dual-Test Truth — Evidence")
+        template.legend({
+            symbols.validated: "validated (both consensus + evidence)",
+            symbols.consensus_only: "consensus only",
+            symbols.evidence_only: "evidence only",
+            symbols.proposed: "proposed"
+        })
+
         if success:
             # Get updated validation
             updated = self.validation.get_validation(target_node.id)
 
             # Show validation progress
             consensus_needed = 2  # Default threshold
-
-            print(f"\nEvidence added.")
-            print(f"  Type: {evidence_type}")
-            print(f"\n  Consensus: {updated.endorsement_count} of {consensus_needed}{' needed' if updated.endorsement_count < consensus_needed else ''}")
-            print(f"  Evidence: {updated.evidence_count}")
-
             alias = self._cli.codec.encode(target_node.id)
+
+            progress_lines = [
+                "Evidence added.",
+                f"  Type: {evidence_type}",
+                "",
+                f"  Consensus: {updated.endorsement_count} of {consensus_needed}{' needed' if updated.endorsement_count < consensus_needed else ''}",
+                f"  Evidence: {updated.evidence_count}"
+            ]
+            template.section("PROGRESS", "\n".join(progress_lines))
+
             if updated.status == ValidationStatus.VALIDATED:
-                print(f"\n  Status: Validated")
-                print(f"  This decision now has both team consensus and evidence.")
+                template.footer("Status: Validated — both team consensus and evidence")
             elif updated.status == ValidationStatus.EVIDENCED:
-                print(f"\n  Status: Needs consensus")
-                print(f"  {symbols.arrow} babel endorse {alias}")
+                template.footer(f"Status: Needs consensus → babel endorse {alias}")
             else:
-                print(f"\n  Status: Needs more consensus")
-                print(f"  {symbols.arrow} Ask a teammate: babel endorse {alias}")
+                template.footer(f"Status: Needs more consensus → Ask a teammate: babel endorse {alias}")
         else:
-            print("Failed to add evidence.")
+            template.section("ERROR", "Failed to add evidence.")
+            template.footer("Check decision ID and try again")
+
+        output = template.render(command="evidence-decision", context={})
+        print(output)
 
     def validation_cmd(self, decision_id: str = None, verbose: bool = False, full: bool = False, output_format: str = None):
         """
@@ -138,66 +174,91 @@ class ValidationCommand(BaseCommand):
         if output_format:
             return self._validation_as_output(decision_id, verbose, full)
 
-        # Original behavior: print directly
+        # Build template
+        template = OutputTemplate(symbols=symbols)
+        template.header("BABEL VALIDATION", "P5: Dual-Test Truth")
+        template.legend({
+            symbols.validated: "validated (both consensus + evidence)",
+            symbols.consensus_only: "consensus only (groupthink risk)",
+            symbols.evidence_only: "evidence only (unreviewed risk)",
+            symbols.proposed: "proposed"
+        })
+
         if decision_id:
             # Show specific decision (use CLI's _find_node_by_id)
             target_node = self._cli._find_node_by_id(decision_id)
 
             if not target_node:
-                print(f"Decision not found: {decision_id}")
+                template.section("ERROR", f"Decision not found: {decision_id}")
+                template.footer("Check decision ID and try again")
+                print(template.render())
                 return
 
             validation = self.validation.get_validation(target_node.id)
+            alias = self._cli.codec.encode(target_node.id)
 
-            print(f"\nDecision {self._cli.format_id(target_node.id)}")
-            print(f"  {target_node.content.get('summary', '')}")
-            print()
+            decision_lines = [
+                f"Decision [{self._cli.format_id(target_node.id)}]",
+                f"  {get_node_summary(target_node)}"
+            ]
+            template.section("DECISION", "\n".join(decision_lines))
 
             if validation:
-                print(format_validation_status(validation, verbose=verbose, full=full))
+                template.section("STATUS", format_validation_status(validation, verbose=verbose, full=full))
+                template.footer(f"Decision {validation.status.value}")
             else:
-                alias = self._cli.codec.encode(target_node.id)
-                print(f"{symbols.proposed} PROPOSED -- not yet validated")
-                print()
-                print("To validate this decision:")
-                print(f"  * Consensus: babel endorse {alias}")
-                print(f"  * Evidence: babel evidence {alias} \"...\"")
+                action_lines = [
+                    f"{symbols.proposed} PROPOSED -- not yet validated",
+                    "",
+                    "To validate this decision:",
+                    f"  * Consensus: babel endorse {alias}",
+                    f"  * Evidence: babel evidence-decision {alias} \"...\""
+                ]
+                template.section("STATUS", "\n".join(action_lines))
+                template.footer("Decision needs validation")
         else:
             # Show summary
-            print(format_validation_summary(self.validation, full=full))
+            template.section("SUMMARY", format_validation_summary(self.validation, full=full))
 
             # Show partial validations with warnings
             partial = self.validation.get_partially_validated()
 
             if partial["consensus_only"]:
-                print(f"\n{symbols.check_warn} Groupthink Risk (consensus without evidence):")
+                groupthink_lines = [f"{symbols.check_warn} Groupthink Risk (consensus without evidence):"]
                 for did in partial["consensus_only"][:5]:
                     node = self._cli._find_node_by_id(did)
                     formatted_id = self._cli.format_id(did)
                     if node:
-                        summary = truncate(node.content.get('summary', ''), SUMMARY_LENGTH, full)
-                        print(f"  {formatted_id} {summary}")
+                        summary = generate_summary(get_node_summary(node), full=full)
+                        # P12: Time always shown
+                        time_str = f" ({format_timestamp(node.created_at)})" if node.created_at else ""
+                        groupthink_lines.append(f"  {formatted_id} {summary}{time_str}")
                     else:
-                        # Show ID even if node not found in graph
-                        print(f"  {formatted_id} (decision not in graph)")
-                print(f"\n  {symbols.arrow} babel evidence-decision <id> \"...\" to add evidence")
+                        groupthink_lines.append(f"  {formatted_id} (decision not in graph)")
+                groupthink_lines.append(f"\n  {symbols.arrow} babel evidence-decision <id> \"...\" to add evidence")
+                template.section("WARNING", "\n".join(groupthink_lines))
 
             if partial["evidence_only"]:
-                print(f"\n{symbols.check_warn} Unreviewed Risk (evidence without consensus):")
+                unreviewed_lines = [f"{symbols.check_warn} Unreviewed Risk (evidence without consensus):"]
                 for did in partial["evidence_only"][:5]:
                     node = self._cli._find_node_by_id(did)
                     formatted_id = self._cli.format_id(did)
                     if node:
-                        summary = truncate(node.content.get('summary', ''), SUMMARY_LENGTH, full)
-                        print(f"  {formatted_id} {summary}")
+                        summary = generate_summary(get_node_summary(node), full=full)
+                        # P12: Time always shown
+                        time_str = f" ({format_timestamp(node.created_at)})" if node.created_at else ""
+                        unreviewed_lines.append(f"  {formatted_id} {summary}{time_str}")
                     else:
-                        # Show ID even if node not found in graph
-                        print(f"  {formatted_id} (decision not in graph)")
-                print(f"\n  {symbols.arrow} babel endorse <id> to add consensus")
+                        unreviewed_lines.append(f"  {formatted_id} (decision not in graph)")
+                unreviewed_lines.append(f"\n  {symbols.arrow} babel endorse <id> to add consensus")
+                template.section("WARNING", "\n".join(unreviewed_lines))
 
-        # Succession hint (centralized)
-        from ..output import end_command
-        end_command("validation", {})
+            # Footer summary
+            stats = self.validation.stats()
+            template.footer(f"{stats['validated']} validated | {stats['tracked']} tracked")
+
+        output = template.render(command="validation", context={})
+        print(output)
 
     def _validation_as_output(self, decision_id: str = None, verbose: bool = False, full: bool = False):
         """
@@ -222,7 +283,7 @@ class ValidationCommand(BaseCommand):
 
             data = {
                 "id": alias,
-                "summary": target_node.content.get('summary', ''),
+                "summary": get_node_summary(target_node),
                 "status": validation.status.value if validation else "proposed",
                 "consensus": validation.endorsement_count if validation else 0,
                 "evidence": validation.evidence_count if validation else 0,
@@ -251,7 +312,7 @@ class ValidationCommand(BaseCommand):
                     node = self._cli._find_node_by_id(did)
                     val = self.validation.get_validation(did)
                     alias = self._cli.codec.encode(did)
-                    summary = node.content.get('summary', '')[:50] if node else "(not in graph)"
+                    summary = generate_summary(get_node_summary(node)) if node else "(not in graph)"
 
                     rows.append({
                         "id": alias,

@@ -9,7 +9,7 @@ Supports:
 - Terminal width awareness
 """
 
-from typing import TYPE_CHECKING, List, Dict, Any, Optional
+from typing import TYPE_CHECKING, List, Dict, Optional
 
 from .base import BaseRenderer
 

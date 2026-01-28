@@ -11,6 +11,7 @@ from ..commands.base import BaseCommand
 from ..core.events import EventType, capture_commit
 from ..services.git import GitIntegration, format_commit_for_extraction
 from ..tracking.coherence import format_coherence_status
+from ..presentation.template import OutputTemplate
 
 
 class GitCommand(BaseCommand):
@@ -107,12 +108,21 @@ class GitCommand(BaseCommand):
 
         success, message = git.install_hooks()
 
+        template = OutputTemplate(symbols=symbols)
+
         if success:
-            print(f"{symbols.check_pass} {message}")
-            print("\nCommits will now be captured automatically.")
-            print("View captured commits with: babel history")
+            template.header("BABEL HOOKS", "Git Hooks Installed")
+            template.section("STATUS", f"{symbols.check_pass} {message}")
+            template.section("INFO", "Commits will now be captured automatically.")
+            template.section("ACTION", "View captured commits with: babel history")
+            template.footer(f"{symbols.check_pass} Hooks ready")
+            output = template.render(command="hooks", context={"installed": True})
         else:
-            print(f"{symbols.check_fail} {message}")
+            template.header("BABEL HOOKS", "Installation Failed")
+            template.section("ERROR", f"{symbols.check_fail} {message}")
+            output = template.render(command="hooks", context={"error": True})
+
+        print(output)
 
     def uninstall_hooks(self):
         """Remove git hooks."""
@@ -121,17 +131,32 @@ class GitCommand(BaseCommand):
 
         success, message = git.uninstall_hooks()
 
+        template = OutputTemplate(symbols=symbols)
+
         if success:
-            print(f"{symbols.check_pass} {message}")
+            template.header("BABEL HOOKS", "Git Hooks Removed")
+            template.section("STATUS", f"{symbols.check_pass} {message}")
+            template.footer(f"{symbols.check_pass} Hooks removed")
+            output = template.render(command="hooks", context={"uninstalled": True})
         else:
-            print(f"{symbols.check_fail} {message}")
+            template.header("BABEL HOOKS", "Uninstall Failed")
+            template.section("ERROR", f"{symbols.check_fail} {message}")
+            output = template.render(command="hooks", context={"error": True})
+
+        print(output)
 
     def hooks_status(self):
         """Show git hooks status."""
+        symbols = self.symbols
         git = GitIntegration(self.project_dir)
 
         status = git.hooks_status()
-        print(f"Git hooks: {status}")
+
+        template = OutputTemplate(symbols=symbols)
+        template.header("BABEL HOOKS", "Status")
+        template.section("GIT HOOKS", status)
+        output = template.render(command="hooks", context={"status": status})
+        print(output)
 
 
 # =============================================================================

@@ -73,7 +73,8 @@ class TestInitMethod:
                                 )
 
         captured = capsys.readouterr()
-        assert "Project created" in captured.out
+        assert "BABEL INIT" in captured.out
+        assert "PROJECT" in captured.out
         assert "Need:" in captured.out
         assert "AI sessions lose context" in captured.out
         assert "Purpose:" in captured.out
@@ -262,12 +263,12 @@ class TestGitignoreProtection:
         assert ".env" in content  # Added
 
     def test_skips_when_patterns_exist(self, init_command):
-        """Skips when all env patterns already present."""
+        """Skips when all protection patterns already present."""
         cmd, factory = init_command
 
-        # Create complete .gitignore
+        # Create complete .gitignore with all patterns (env + manual)
         gitignore_path = factory.tmp_path / ".gitignore"
-        gitignore_path.write_text(".env\n.env.local\n.env*.local\n")
+        gitignore_path.write_text(".env\n.env.local\n.env*.local\n.babel/manual/\n")
 
         patterns_added, message = cmd._ensure_gitignore_protection()
 
@@ -525,7 +526,8 @@ class TestInitIntegration:
         captured = capsys.readouterr()
 
         # All components should be addressed
-        assert "Project created" in captured.out
+        assert "BABEL INIT" in captured.out
+        assert "PROJECT" in captured.out
         assert "Need:" in captured.out
         assert "Purpose:" in captured.out
         assert "capture" in captured.out.lower()  # Usage hint
@@ -618,7 +620,7 @@ class TestEdgeCases:
 
         # Should not crash
         captured = capsys.readouterr()
-        assert "Project created" in captured.out
+        assert "BABEL INIT" in captured.out
 
     def test_handles_special_chars_in_path(self, init_command, capsys):
         """Handles special characters in project path."""
@@ -634,7 +636,7 @@ class TestEdgeCases:
                                 cmd.init(purpose="Test", need="Test")
 
         captured = capsys.readouterr()
-        assert "Project created" in captured.out
+        assert "BABEL INIT" in captured.out
 
     def test_handles_read_only_directory(self, init_command, capsys):
         """Gracefully handles read-only directories."""

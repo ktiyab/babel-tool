@@ -11,6 +11,8 @@ from typing import Optional
 
 from ..commands.base import BaseCommand
 from ..core.events import Event, EventType
+from ..presentation.formatters import format_timestamp
+from ..presentation.template import OutputTemplate
 
 
 class HistoryCommand(BaseCommand):
@@ -20,6 +22,47 @@ class HistoryCommand(BaseCommand):
     HC5: Graceful Sync — team collaboration works.
     Manages event timeline, promotion, and synchronization.
     """
+
+    # Artifact type → actionable commands mapping
+    # Used for legend display (DRY: stated once, not repeated per-event)
+    ARTIFACT_ACTIONS = {
+        'decision': ['link', 'endorse', 'evidence-decision', 'deprecate'],
+        'constraint': ['link', 'deprecate'],
+        'purpose': ['link'],
+        'principle': ['link'],
+        'requirement': ['link'],
+        'boundary': ['link'],
+        'tension': ['resolve', 'evidence'],
+    }
+
+    def _format_artifact_legend(self, events: list) -> dict:
+        """
+        Build legend of artifact types → available actions.
+
+        Only shows types present in the event list.
+        Follows DRY: actions stated once in legend, not repeated per-event.
+
+        Returns:
+            Dict mapping artifact types to action descriptions for template legend.
+        """
+        # Collect unique artifact types present in events
+        types_present = set()
+        for event in events:
+            if event.parent_id:
+                node = self.graph.get_node(event.parent_id)
+                if node:
+                    types_present.add(node.type)
+                elif event.data.get('artifact_type'):
+                    types_present.add(event.data.get('artifact_type'))
+
+        if not types_present:
+            return {}
+
+        legend = {}
+        for artifact_type in sorted(types_present):
+            actions = self.ARTIFACT_ACTIONS.get(artifact_type, ['link'])
+            legend[artifact_type] = ', '.join(actions)
+        return legend
 
     def history(self, limit: int = 10, scope_filter: Optional[str] = None, output_format: str = None):
         """
@@ -41,44 +84,73 @@ class HistoryCommand(BaseCommand):
         if output_format:
             return self._history_as_output(events, scope_filter)
 
-        # Original behavior: print directly
-        scope_label = f" ({scope_filter})" if scope_filter else ""
-        print(f"\nRecent activity{scope_label} ({len(events)} events):\n")
-
         symbols = self.symbols
+        scope_label = f" ({scope_filter})" if scope_filter else ""
 
+        # Build template
+        template = OutputTemplate(symbols=symbols)
+        template.header("BABEL HISTORY", f"Recent activity{scope_label}")
+
+        # Legend: scope markers + artifact types → actions (DRY)
+        base_legend = {
+            symbols.shared: "shared",
+            symbols.local: "local"
+        }
+        artifact_legend = self._format_artifact_legend(events)
+        template.legend(base_legend)
+
+        # Build events list
+        event_lines = []
         for event in events:
             # Scope marker
             scope_marker = symbols.shared if event.is_shared else symbols.local
 
             # Human-friendly formatting (HC6)
             # Dual-Display: [ID] + readable description for comprehension AND action
-            timestamp = event.timestamp[:10]  # Just date
-            formatted_id = self._cli.format_id(event.id)
+            # P12: Time always shown - no flags, no parameters
+            timestamp = format_timestamp(event.timestamp)
+            event_id_formatted = self._cli.format_id(event.id)
 
             if event.type == EventType.CONVERSATION_CAPTURED:
                 preview = event.data.get('content', '')[:40]
-                print(f"  {scope_marker} {timestamp} {formatted_id} Captured: \"{preview}...\"")
+                event_lines.append(f"  {scope_marker} {timestamp} {event_id_formatted} Captured: \"{preview}...\"")
             elif event.type == EventType.PURPOSE_DECLARED:
-                print(f"  {scope_marker} {timestamp} {formatted_id} Purpose: {event.data.get('purpose', '')[:40]}")
+                event_lines.append(f"  {scope_marker} {timestamp} {event_id_formatted} Purpose: {event.data.get('purpose', '')[:40]}")
             elif event.type == EventType.ARTIFACT_CONFIRMED:
                 artifact_type = event.data.get('artifact_type', 'artifact')
-                print(f"  {scope_marker} {timestamp} {formatted_id} Confirmed: {artifact_type}")
+                event_lines.append(f"  {scope_marker} {timestamp} {event_id_formatted} Confirmed: {artifact_type}")
             elif event.type == EventType.COMMIT_CAPTURED:
                 hash_short = event.data.get('hash', '')[:8]
                 message = event.data.get('message', '')[:35]
-                print(f"  {scope_marker} {timestamp} {formatted_id} Commit: [{hash_short}] {message}")
+                event_lines.append(f"  {scope_marker} {timestamp} {event_id_formatted} Commit: [{hash_short}] {message}")
             elif event.type == EventType.EVENT_PROMOTED:
                 promoted_id = event.data.get('promoted_id', '')
                 promoted_alias = self._cli.codec.encode(promoted_id) if promoted_id else ''
-                print(f"  {scope_marker} {timestamp} {formatted_id} Promoted: {promoted_alias}")
+                event_lines.append(f"  {scope_marker} {timestamp} {event_id_formatted} Promoted: {promoted_alias}")
             else:
                 type_display = event.type.value.replace('_', ' ').title()
-                print(f"  {scope_marker} {timestamp} {formatted_id} {type_display}")
+                event_lines.append(f"  {scope_marker} {timestamp} {event_id_formatted} {type_display}")
 
-        # Succession hint (centralized)
-        from ..output import end_command
-        end_command("history", {})
+            # Self-documenting: show artifact info when available
+            # Actions shown in legend (DRY), here just type + ID
+            artifact_id, artifact_type = self._get_artifact_info(event)
+            if artifact_id:
+                artifact_id_formatted = self._cli.format_id(artifact_id)
+                event_lines.append(f"      {artifact_type} {artifact_id_formatted}")
+
+        template.section(f"EVENTS ({len(events)} events)", "\n".join(event_lines))
+
+        # Artifact actions legend section (if any)
+        if artifact_legend:
+            legend_lines = [f"  {atype}: {actions}" for atype, actions in artifact_legend.items()]
+            template.section("ARTIFACT ACTIONS", "\n".join(legend_lines))
+
+        # Footer
+        template.footer(f"{len(events)} events displayed")
+
+        # Render with succession hints
+        output = template.render(command="history", context={})
+        print(output)
 
     def _history_as_output(self, events: list, scope_filter: Optional[str] = None):
         """Return history data as OutputSpec for rendering."""
@@ -104,10 +176,12 @@ class HistoryCommand(BaseCommand):
             else:
                 description = event.type.value.replace('_', ' ').title()
 
+            # Use parent_id when set (artifact ID) for consistent command usage
+            display_id = event.parent_id if event.parent_id else event.id
             rows.append({
                 "scope": "S" if event.is_shared else "L",
-                "date": event.timestamp[:10],
-                "id": self._cli.codec.encode(event.id),
+                "time": format_timestamp(event.timestamp),  # P12: time always shown
+                "id": self._cli.codec.encode(display_id),
                 "type": event.type.value.replace('_', ' ').title()[:15],
                 "description": description
             })
@@ -116,8 +190,8 @@ class HistoryCommand(BaseCommand):
         return OutputSpec(
             data=rows,
             shape="table",
-            columns=["", "Date", "ID", "Type", "Description"],
-            column_keys=["scope", "date", "id", "type", "description"],
+            columns=["", "Time", "ID", "Type", "Description"],
+            column_keys=["scope", "time", "id", "type", "description"],
             title=f"Recent activity{scope_label} ({len(events)} events)",
             command="history",
             context={}
@@ -128,29 +202,46 @@ class HistoryCommand(BaseCommand):
         Promote an event from local to shared.
 
         Args:
-            event_id: Event ID (or prefix) to promote
+            event_id: Event ID (alias code or prefix) to promote
         """
         symbols = self.symbols
+
+        # Resolve alias code to raw ID (counterpart to format_id for output)
+        event_id = self._cli.resolve_id(event_id)
 
         # Find event by ID prefix
         all_events = self.events.read_all()
         matches = [e for e in all_events if e.id.startswith(event_id)]
 
         if not matches:
-            print(f"Event not found: {event_id}")
-            print(f"\nRecent local events:")
+            # Build error template
+            template = OutputTemplate(symbols=symbols)
+            template.header("BABEL SHARE", "Event Promotion")
+            template.section("ERROR", f"Event not found: {event_id}")
+
             local = self.events.read_local()[-5:]
-            for e in local:
-                preview = self._event_preview(e)
-                print(f"  {self._cli.format_id(e.id)} {preview}")
+            if local:
+                local_lines = []
+                for e in local:
+                    preview = self._event_preview(e)
+                    local_lines.append(f"  {self._cli.format_id(e.id)} {preview}")
+                template.section("RECENT LOCAL EVENTS", "\n".join(local_lines))
+
+            print(template.render())
             return
 
         if len(matches) > 1:
-            print(f"Multiple matches for '{event_id}':")
+            template = OutputTemplate(symbols=symbols)
+            template.header("BABEL SHARE", "Event Promotion")
+
+            match_lines = []
             for e in matches:
                 preview = self._event_preview(e)
-                print(f"  {self._cli.format_id(e.id)} {preview}")
-            print(f"\nBe more specific.")
+                match_lines.append(f"  {self._cli.format_id(e.id)} {preview}")
+            template.section("MULTIPLE MATCHES", f"Multiple matches for '{event_id}':\n" + "\n".join(match_lines))
+            template.footer("Be more specific")
+
+            print(template.render())
             return
 
         event = matches[0]
@@ -162,12 +253,14 @@ class HistoryCommand(BaseCommand):
         promoted = self.events.promote(event.id)
         if promoted:
             preview = self._event_preview(promoted)
-            print(f"Shared: {preview}")
-            print(f"  (Will sync with git push)")
 
-            # Succession hint (centralized)
-            from ..output import end_command
-            end_command("share", {})
+            template = OutputTemplate(symbols=symbols)
+            template.header("BABEL SHARE", "Event Promotion")
+            template.section("SHARED", f"{preview}\n  (Will sync with git push)")
+            template.footer("Event promoted to shared scope")
+
+            output = template.render(command="share", context={})
+            print(output)
         else:
             print(f"Could not promote: {event_id}")
 
@@ -184,6 +277,29 @@ class HistoryCommand(BaseCommand):
         else:
             return event.type.value.replace('_', ' ').title()
 
+    def _get_artifact_info(self, event: Event) -> tuple:
+        """
+        Get artifact info for an event if it has an associated artifact.
+
+        Returns:
+            Tuple of (artifact_id, artifact_type) or (None, None)
+            Actions are shown in legend (DRY), not returned per-event.
+        """
+        if not event.parent_id:
+            return None, None
+
+        # Try to find artifact type from graph
+        artifact_type = None
+        node = self.graph.get_node(event.parent_id)
+        if node:
+            artifact_type = node.type
+
+        # Fallback: check event data for artifact_type
+        if not artifact_type:
+            artifact_type = event.data.get('artifact_type', 'artifact')
+
+        return event.parent_id, artifact_type
+
     def sync(self, verbose: bool = False):
         """
         Synchronize events after git pull.
@@ -192,34 +308,47 @@ class HistoryCommand(BaseCommand):
         """
         symbols = self.symbols
 
-        print("Syncing...")
-
+        # Perform sync operation
         result = self.events.sync()
-
-        if result["deduplicated"] > 0:
-            print(f"  Resolved {result['deduplicated']} duplicate(s)")
 
         # Rebuild graph from merged events (via CLI)
         self._cli._rebuild_graph()
 
         shared, local = self.events.count_by_scope()
-        print(f"  Events: {symbols.shared} {shared} shared, {symbols.local} {local} local")
 
+        # Build template
+        template = OutputTemplate(symbols=symbols)
+        template.header("BABEL SYNC", "Post-Git-Pull Synchronization")
+        template.legend({
+            symbols.shared: "shared",
+            symbols.local: "local"
+        })
+
+        # Sync results section
+        result_lines = []
+        if result["deduplicated"] > 0:
+            result_lines.append(f"Resolved {result['deduplicated']} duplicate(s)")
+        result_lines.append(f"Events: {symbols.shared} {shared} shared, {symbols.local} {local} local")
+        template.section("SYNC RESULTS", "\n".join(result_lines))
+
+        # Verbose: show recent shared events
         if verbose:
-            # Show recent shared events
             recent_shared = self.events.read_shared()[-5:]
             if recent_shared:
-                print(f"\nRecent shared:")
+                recent_lines = []
                 for e in recent_shared:
                     preview = self._event_preview(e)
                     scope_marker = symbols.shared if e.is_shared else symbols.local
-                    print(f"  {scope_marker} {e.timestamp[:10]} | {preview}")
+                    # P12: Time always shown
+                    recent_lines.append(f"  {scope_marker} {format_timestamp(e.timestamp)} | {preview}")
+                template.section("RECENT SHARED", "\n".join(recent_lines))
 
-        print("Done.")
+        # Footer
+        template.footer("Done")
 
-        # Succession hint (centralized)
-        from ..output import end_command
-        end_command("sync", {})
+        # Render with succession hints
+        output = template.render(command="sync", context={})
+        print(output)
 
 
 # =============================================================================

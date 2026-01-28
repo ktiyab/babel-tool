@@ -5,13 +5,13 @@ These tests validate: "Append-only event integrity"
 If these pass, HC1 is honored.
 """
 
-import pytest
-import tempfile
-from pathlib import Path
 
 from babel.core.events import (
     EventStore, Event, EventType,
-    capture_conversation, declare_purpose, confirm_artifact
+    capture_conversation, declare_purpose, confirm_artifact,
+    endorse_decision, evidence_decision, register_decision_for_validation,
+    deprecate_artifact, resolve_question, add_evidence,
+    resolve_challenge
 )
 
 
@@ -191,3 +191,106 @@ class TestP1NeedGrounding:
         assert event.data['need'] != event.data['purpose']
         assert "data loss" in event.data['need']
         assert "offline" in event.data['purpose']
+
+
+# =============================================================================
+# Parent ID Consistency Tests (OF-FX decision)
+# =============================================================================
+
+class TestParentIdConsistency:
+    """
+    Artifact-referencing events must set parent_id for consistent ID display.
+
+    Enables history to show artifact IDs that work with follow-up commands
+    like endorse, evidence-decision, etc.
+    """
+
+    def test_endorse_decision_sets_parent_id(self):
+        """endorse_decision sets parent_id to decision_id."""
+        event = endorse_decision(decision_id="decision_abc123", author="user")
+
+        assert event.parent_id == "decision_abc123"
+        assert event.data["decision_id"] == "decision_abc123"
+
+    def test_evidence_decision_sets_parent_id(self):
+        """evidence_decision sets parent_id to decision_id."""
+        event = evidence_decision(
+            decision_id="decision_def456",
+            content="Tests pass",
+            evidence_type="observation"
+        )
+
+        assert event.parent_id == "decision_def456"
+        assert event.data["decision_id"] == "decision_def456"
+
+    def test_register_decision_for_validation_sets_parent_id(self):
+        """register_decision_for_validation sets parent_id to decision_id."""
+        event = register_decision_for_validation(
+            decision_id="decision_ghi789",
+            summary="Use SQLite for storage"
+        )
+
+        assert event.parent_id == "decision_ghi789"
+        assert event.data["decision_id"] == "decision_ghi789"
+
+    def test_deprecate_artifact_sets_parent_id(self):
+        """deprecate_artifact sets parent_id to artifact_id."""
+        event = deprecate_artifact(
+            artifact_id="constraint_jkl012",
+            reason="No longer applicable"
+        )
+
+        assert event.parent_id == "constraint_jkl012"
+        assert event.data["artifact_id"] == "constraint_jkl012"
+
+    def test_resolve_question_sets_parent_id(self):
+        """resolve_question sets parent_id to question_id."""
+        event = resolve_question(
+            question_id="question_mno345",
+            resolution="Decided to use REST",
+            outcome="answered"
+        )
+
+        assert event.parent_id == "question_mno345"
+        assert event.data["question_id"] == "question_mno345"
+
+    def test_add_evidence_sets_parent_id(self):
+        """add_evidence sets parent_id to challenge_id."""
+        event = add_evidence(
+            challenge_id="challenge_pqr678",
+            content="Benchmark shows 50ms latency"
+        )
+
+        assert event.parent_id == "challenge_pqr678"
+        assert event.data["challenge_id"] == "challenge_pqr678"
+
+    def test_resolve_challenge_sets_parent_id(self):
+        """resolve_challenge sets parent_id to challenge_id."""
+        event = resolve_challenge(
+            challenge_id="challenge_stu901",
+            outcome="revised",
+            resolution="Adopted new approach based on evidence"
+        )
+
+        assert event.parent_id == "challenge_stu901"
+        assert event.data["challenge_id"] == "challenge_stu901"
+
+    def test_capture_conversation_parent_id_optional(self):
+        """capture_conversation has optional parent_id (root events)."""
+        # Root capture - no parent
+        event1 = capture_conversation("Test thought")
+        assert event1.parent_id is None
+
+        # Child capture - with parent
+        event2 = capture_conversation("Follow-up", parent_id="parent_123")
+        assert event2.parent_id == "parent_123"
+
+    def test_confirm_artifact_sets_parent_id(self):
+        """confirm_artifact sets parent_id to proposal_id (existing behavior)."""
+        event = confirm_artifact(
+            proposal_id="proposal_vwx234",
+            artifact_type="decision",
+            content={"summary": "Use Postgres"}
+        )
+
+        assert event.parent_id == "proposal_vwx234"

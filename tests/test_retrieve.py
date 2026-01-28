@@ -5,12 +5,10 @@ These tests validate Success Criterion 1:
 "Reasoning travels with artifacts. 'Why?' always has an answer."
 """
 
-import pytest
-from pathlib import Path
 
 from babel.core.events import EventStore, capture_conversation, declare_purpose, confirm_artifact, propose_structure
 from babel.core.graph import GraphStore, Node, Edge
-from babel.services.extractor import Extractor, Proposal
+from babel.services.extractor import Extractor
 
 
 class TestCaptureFlow:

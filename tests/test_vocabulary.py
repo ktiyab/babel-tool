@@ -7,9 +7,6 @@ Minimal design:
 - Learning from use
 """
 
-import pytest
-import json
-from pathlib import Path
 
 from babel.core.vocabulary import Vocabulary, merge_vocabularies, DEFAULT_CLUSTERS
 

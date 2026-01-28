@@ -8,13 +8,9 @@ Git-like scalability:
 """
 
 import pytest
-import tempfile
-import json
-from pathlib import Path
-from datetime import datetime, timezone
 
-from babel.core.refs import RefStore, Ref, extract_topics
-from babel.core.loader import LazyLoader, LoadResult, TokenBudget, within_budget
+from babel.core.refs import RefStore, extract_topics
+from babel.core.loader import LazyLoader, TokenBudget, within_budget
 from babel.core.events import Event, EventType, DualEventStore
 from babel.core.graph import GraphStore
 

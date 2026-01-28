@@ -12,6 +12,8 @@ from typing import Optional
 from ..commands.base import BaseCommand
 from ..core.events import EventType, deprecate_artifact
 from ..core.scope import EventScope
+from ..presentation.formatters import get_node_summary, generate_summary
+from ..presentation.template import OutputTemplate
 
 
 class DeprecateCommand(BaseCommand):
@@ -57,16 +59,21 @@ class DeprecateCommand(BaseCommand):
         Deprecate an artifact (P7: living artifacts, not exhaustive archives).
 
         Args:
-            artifact_id: Artifact ID (or prefix) to deprecate
+            artifact_id: Artifact ID (alias code or prefix) to deprecate
             reason: Why it's being deprecated
-            superseded_by: ID of replacement (optional)
+            superseded_by: ID (alias code or prefix) of replacement (optional)
 
         Deprecated items are de-prioritized in retrieval, not deleted (HC1 preserved).
         P8: Requires explanation to avoid silent abandonment.
         """
         symbols = self.symbols
 
-        # P8: Validate non-empty reason (no silent abandonment)
+        # Resolve alias codes to raw IDs (counterpart to format_id for output)
+        artifact_id = self._cli.resolve_id(artifact_id)
+        if superseded_by:
+            superseded_by = self._cli.resolve_id(superseded_by)
+
+        # P8: Validate non-empty reason (no silent abandonment) - INTERACTIVE
         if not reason or len(reason.strip()) < 5:
             print(f"{symbols.check_warn} P8: Reason required for deprecation (no silent abandonment).")
             print("  Why is this being deprecated? What did we learn?")
@@ -79,25 +86,41 @@ class DeprecateCommand(BaseCommand):
         target_node = self._cli._resolve_node(artifact_id, type_label="artifact")
 
         if not target_node:
-            print(f"Artifact not found: {artifact_id}")
-            print("\nRecent decisions:")
+            template = OutputTemplate(symbols=symbols)
+            template.header("BABEL DEPRECATE", "Artifact Not Found")
+            template.section("STATUS", f"Artifact not found: {artifact_id}")
+
+            # Show recent decisions as suggestions
             decisions = self.graph.get_nodes_by_type("decision")[-5:]
-            for d in decisions:
-                summary = d.content.get("summary", "")[:40]
-                print(f"  {self._cli.format_id(d.id)} {summary}")
+            if decisions:
+                suggestion_lines = []
+                for d in decisions:
+                    summary = generate_summary(get_node_summary(d))
+                    suggestion_lines.append(f"  {self._cli.format_id(d.id)} {summary}")
+                template.section("RECENT DECISIONS", "\n".join(suggestion_lines))
+
+            template.footer("Specify a valid artifact ID")
+            output = template.render(command="deprecate", context={"not_found": True})
+            print(output)
             return
 
         # Check if already deprecated
         if self._is_deprecated(target_node.id):
-            print(f"Artifact {self._cli.format_id(target_node.id)} is already deprecated.")
+            template = OutputTemplate(symbols=symbols)
+            template.header("BABEL DEPRECATE", "Already Deprecated")
+            template.section("STATUS", f"Artifact {self._cli.format_id(target_node.id)} is already deprecated.")
+            template.footer("No action needed")
+            output = template.render(command="deprecate", context={"already_deprecated": True})
+            print(output)
             return
 
         # Validate superseded_by if provided
         replacement_node = None
+        replacement_warning = None
         if superseded_by:
             replacement_node = self._cli._resolve_node(superseded_by, type_label="artifact")
             if not replacement_node:
-                print(f"Warning: Replacement artifact '{superseded_by}' not found.")
+                replacement_warning = f"Replacement artifact '{superseded_by}' not found."
 
         # Create deprecation event
         event = deprecate_artifact(
@@ -109,20 +132,39 @@ class DeprecateCommand(BaseCommand):
         # Deprecation is shared (team needs to know)
         self.events.append(event, scope=EventScope.SHARED)
 
-        print(f"\n{symbols.deprecated} Deprecated {self._cli.format_id(target_node.id)}")
-        print(f"  {target_node.type}: {target_node.content.get('summary', '')[:50]}")
-        print(f"  Lesson: {reason}")
+        # Build success output with OutputTemplate
+        template = OutputTemplate(symbols=symbols)
+        template.header("BABEL DEPRECATE", "Artifact Deprecated (P7)")
+        template.legend({
+            symbols.deprecated: "deprecated",
+            symbols.shared: "shared with team"
+        })
 
+        # ARTIFACT section
+        artifact_line = f"{symbols.deprecated} {self._cli.format_id(target_node.id)}"
+        artifact_line += f"\n  Type: {target_node.type}"
+        artifact_line += f"\n  Summary: {generate_summary(get_node_summary(target_node))}"
+        template.section("ARTIFACT", artifact_line)
+
+        # LESSON section (P8)
+        template.section("LESSON (P8)", reason)
+
+        # SUPERSEDED BY section (if applicable)
         if replacement_node:
-            print(f"  Superseded by: {self._cli.format_id(replacement_node.id)}")
+            template.section("SUPERSEDED BY", self._cli.format_id(replacement_node.id))
+        elif replacement_warning:
+            template.section("WARNING", replacement_warning)
 
-        print()
-        print("This artifact is now de-prioritized in queries.")
-        print("History preserved (HC1) -- AI will surface this as a lesson learned (P8).")
+        # STATUS section
+        status_lines = [
+            "This artifact is now de-prioritized in queries.",
+            "History preserved (HC1) — AI will surface this as a lesson learned (P8)."
+        ]
+        template.section("STATUS", "\n".join(status_lines))
 
-        # Succession hint (centralized)
-        from ..output import end_command
-        end_command("deprecate", {})
+        template.footer(f"{symbols.shared} Deprecation shared with team")
+        output = template.render(command="deprecate", context={"deprecated": True})
+        print(output)
 
 
 # =============================================================================

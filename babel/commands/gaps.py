@@ -16,7 +16,8 @@ from typing import List, Dict, Set
 from ..commands.base import BaseCommand
 from ..core.commit_links import CommitLinkStore
 from ..services.git import GitIntegration
-from ..presentation.symbols import safe_print
+from ..presentation.template import OutputTemplate
+from ..presentation.formatters import format_timestamp
 from ..utils.pagination import Paginator, DEFAULT_LIMIT
 
 
@@ -70,35 +71,49 @@ class GapsCommand(BaseCommand):
             print("All decisions are linked to commits.")
             return
 
-        print(f"\n{symbols.tension} Implementation Gaps")
-        print(f"(Intent ↔ State bridge incomplete)\n")
+        # Build template
+        template = OutputTemplate(symbols=symbols)
+        template.header("BABEL GAPS", "Intent ↔ State Bridge")
+        template.legend({
+            symbols.tension: "gap (unlinked)",
+            "[ID]": "decision/constraint/principle",
+            "[sha]": "commit"
+        })
 
         # Show unlinked decisions
         if unlinked_decisions and not show_commits:
-            self._show_unlinked_decisions(unlinked_decisions, limit, offset)
+            decisions_content = self._format_unlinked_decisions(unlinked_decisions, limit, offset)
+            template.section("DECISIONS WITHOUT COMMITS", decisions_content)
 
         # Show unlinked commits
         if unlinked_commits and not show_decisions:
-            self._show_unlinked_commits(unlinked_commits, limit, offset)
+            commits_content = self._format_unlinked_commits(unlinked_commits, limit, offset)
+            template.section("COMMITS WITHOUT DECISIONS", commits_content)
 
-        # Summary
-        print(f"\nSummary:")
+        # Action hints section
+        action_lines = [
+            "babel link <decision_id> --to-commit <sha>",
+            "babel suggest-links  (AI-assisted suggestions)"
+        ]
+        template.section("TO LINK", "\n".join(action_lines))
+
+        # Footer summary
+        summary_parts = []
         if unlinked_decisions:
-            print(f"  {symbols.arrow} {len(unlinked_decisions)} decision(s) without commits")
+            summary_parts.append(f"{len(unlinked_decisions)} decision(s) without commits")
         if unlinked_commits:
-            print(f"  {symbols.arrow} {len(unlinked_commits)} commit(s) without decisions")
+            summary_parts.append(f"{len(unlinked_commits)} commit(s) without decisions")
+        template.footer(" | ".join(summary_parts))
 
-        # Action hints
-        print(f"\nTo link:")
-        print(f"  babel link <decision_id> --to-commit <sha>")
-        print(f"  babel suggest-links  (AI-assisted suggestions)")
-
-        # Succession hint
-        from ..output import end_command
-        end_command("gaps", {
-            "unlinked_decisions": len(unlinked_decisions),
-            "unlinked_commits": len(unlinked_commits)
-        })
+        # Render with succession hints
+        output = template.render(
+            command="gaps",
+            context={
+                "unlinked_decisions": len(unlinked_decisions),
+                "unlinked_commits": len(unlinked_commits)
+            }
+        )
+        print(output)
 
     def _find_unlinked_decisions(self, linked_ids: Set[str]) -> List[Dict]:
         """Find decisions that aren't linked to any commit."""
@@ -131,7 +146,8 @@ class GapsCommand(BaseCommand):
                         'short_id': alias,
                         'type': node_type,
                         'summary': summary,
-                        'node': node
+                        'node': node,
+                        'created_at': node.created_at  # P12: Temporal attribution
                     })
 
         return unlinked
@@ -141,9 +157,10 @@ class GapsCommand(BaseCommand):
         """Find recent commits that aren't linked to any decision."""
         unlinked = []
 
-        # Get recent commits
+        # Get recent commits with date (P12: Temporal attribution)
+        # Format: sha|date|message
         output = git._run_git([
-            "log", f"-{from_recent}", "--format=%H|%s", "--no-merges"
+            "log", f"-{from_recent}", "--format=%H|%aI|%s", "--no-merges"
         ])
 
         if not output:
@@ -152,7 +169,10 @@ class GapsCommand(BaseCommand):
         for line in output.strip().split('\n'):
             if '|' not in line:
                 continue
-            sha, message = line.split('|', 1)
+            parts = line.split('|', 2)
+            if len(parts) < 3:
+                continue
+            sha, date, message = parts
 
             # Check if linked
             is_linked = any(
@@ -168,19 +188,23 @@ class GapsCommand(BaseCommand):
                 unlinked.append({
                     'sha': sha,
                     'short_sha': sha[:8],
-                    'message': message
+                    'message': message,
+                    'date': date  # P12: Temporal attribution
                 })
 
         return unlinked
 
-    def _show_unlinked_decisions(self, decisions: List[Dict], limit: int, offset: int):
-        """Display unlinked decisions."""
+    def _format_unlinked_decisions(self, decisions: List[Dict], limit: int, offset: int) -> str:
+        """Format unlinked decisions as string."""
         symbols = self.symbols
 
         paginator = Paginator(decisions, limit=limit, offset=offset)
 
-        print(f"Decisions without commits ({paginator.total}):")
-        print("(Intent captured but not implemented)\n")
+        lines = [
+            f"({paginator.total} total)",
+            "(Intent captured but not implemented)",
+            ""
+        ]
 
         # Group by type
         by_type: Dict[str, List[Dict]] = {}
@@ -190,32 +214,43 @@ class GapsCommand(BaseCommand):
             by_type[d['type']].append(d)
 
         for dtype, items in sorted(by_type.items()):
-            print(f"  [{dtype}]")
+            lines.append(f"  [{dtype}]")
             for item in items:
-                safe_print(f"    [{item['short_id']}] {item['summary'][:50]}")
-            print()
+                # P12: Time always shown
+                time_str = f" ({format_timestamp(item.get('created_at', ''))})"
+                lines.append(f"    [{item['short_id']}] {item['summary'][:50]}{time_str}")
+            lines.append("")
 
         # Navigation
         if paginator.has_more():
-            print(f"  {symbols.arrow} More: babel gaps --decisions --offset {paginator.offset + paginator.limit}")
+            lines.append(f"  {symbols.arrow} More: babel gaps --decisions --offset {paginator.offset + paginator.limit}")
 
-    def _show_unlinked_commits(self, commits: List[Dict], limit: int, offset: int):
-        """Display unlinked commits."""
+        return "\n".join(lines)
+
+    def _format_unlinked_commits(self, commits: List[Dict], limit: int, offset: int) -> str:
+        """Format unlinked commits as string."""
         symbols = self.symbols
 
         paginator = Paginator(commits, limit=limit, offset=offset)
 
-        print(f"Commits without decisions ({paginator.total}):")
-        print("(State changed but intent not documented)\n")
+        lines = [
+            f"({paginator.total} total)",
+            "(State changed but intent not documented)",
+            ""
+        ]
 
         for commit in paginator.items():
-            safe_print(f"  [{commit['short_sha']}] {commit['message'][:50]}")
+            # P12: Time always shown
+            time_str = f" ({format_timestamp(commit.get('date', ''))})"
+            lines.append(f"  [{commit['short_sha']}] {commit['message'][:50]}{time_str}")
 
-        print()
+        lines.append("")
 
         # Navigation
         if paginator.has_more():
-            print(f"  {symbols.arrow} More: babel gaps --commits --offset {paginator.offset + paginator.limit}")
+            lines.append(f"  {symbols.arrow} More: babel gaps --commits --offset {paginator.offset + paginator.limit}")
+
+        return "\n".join(lines)
 
 
 # =============================================================================

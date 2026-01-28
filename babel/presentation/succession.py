@@ -71,7 +71,7 @@ MANUAL_MAP: Dict[str, str] = {
 def _get_manual_file(command: str) -> str:
     """Get manual filename for a command."""
     base = MANUAL_MAP.get(command, command)
-    return f"manual/{base}.md"
+    return f".babel/manual/{base}.md"
 
 
 # =============================================================================
@@ -88,7 +88,7 @@ RULES: Dict[str, Succession] = {
         alternatives=[
             NextStep("gather", "babel gather --symbol <name>", condition="found_symbols",
                     why="Load specific code or documentation section, not entire file"),
-            NextStep("map", "babel map --index src/ manual/", condition="no_symbols",
+            NextStep("map", "babel map --index src/ .babel/manual/", condition="no_symbols",
                     why="No code/doc symbols found - index to enrich results (semantic bridge)"),
             NextStep("link", "babel link <id>", condition="found_unlinked",
                     why="Connect isolated knowledge"),
@@ -227,6 +227,9 @@ RULES: Dict[str, Succession] = {
                         condition="not_checked",
                         why="Ensure alignment"),
         alternatives=[
+            NextStep("process-queue", "babel process-queue --batch",
+                    condition="has_queued_extractions",
+                    why="Process queued extractions awaiting LLM analysis"),
             NextStep("review", "babel review --list", condition="has_pending",
                     why="See queued proposals"),
             NextStep("map", "babel map --index-clear <pattern> (indexed garbage) OR babel link --list (legitimate artifacts)",
@@ -339,7 +342,7 @@ RULES: Dict[str, Succession] = {
                     why="Found something important? Capture before context loss"),
             NextStep("gather", "babel gather --symbol <name>", condition="needs_more",
                     why="Need more code or docs? Add symbols to load in parallel"),
-            NextStep("map", "babel map --index src/ manual/", condition="no_index",
+            NextStep("map", "babel map --index src/ .babel/manual/", condition="no_index",
                     why="No symbol index - build one to enable --symbol loading (code + docs)"),
         ]
     ),

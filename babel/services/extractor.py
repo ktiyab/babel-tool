@@ -17,7 +17,7 @@ Context-Aware Extraction:
 
 import json
 import re
-from typing import Dict, Any, Optional, List, TYPE_CHECKING, Callable, Set
+from typing import Dict, Any, Optional, List, TYPE_CHECKING, Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 from datetime import datetime, timezone
@@ -485,25 +485,32 @@ If nothing to extract:
     def process_queue(self) -> List[Proposal]:
         """
         Process queued extractions (when coming back online).
-        
+
         Returns all proposals from queued items.
+        Clears successfully processed items regardless of whether proposals were extracted.
+        Failed items are re-queued for retry.
         """
         if not self.queue or not self.is_available:
             return []
-        
+
         proposals = []
         items = self.queue.get_all()
-        
+        failed_items = []
+
         for item in items:
             try:
                 item_proposals = self._extract_with_llm(item.text, item.source_id)
                 proposals.extend(item_proposals)
+                # Item processed successfully (even if no proposals extracted)
             except Exception:
-                continue  # Keep in queue for next attempt
-        
-        if proposals:
-            self.queue.clear()
-        
+                # Keep failed items for retry
+                failed_items.append(item)
+
+        # Clear queue and re-add only failed items
+        self.queue.clear()
+        for item in failed_items:
+            self.queue.add(item.text, item.source_id)
+
         return proposals
     
     def format_for_confirmation(self, proposal: Proposal) -> str:

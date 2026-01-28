@@ -9,10 +9,8 @@ These tests validate:
 """
 
 import pytest
-import tempfile
-from pathlib import Path
 
-from babel.core.events import EventStore, capture_conversation, declare_purpose
+from babel.core.events import EventStore, declare_purpose
 from babel.core.graph import GraphStore, Node, Edge
 
 

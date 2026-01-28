@@ -14,7 +14,6 @@ Aligns with:
 """
 
 import pytest
-from unittest.mock import Mock, patch
 
 from babel.commands.review import ReviewCommand
 from babel.core.events import EventType
@@ -146,7 +145,7 @@ class TestListProposals:
         cmd._list_proposals(pending, symbols)
         captured = capsys.readouterr()
 
-        assert "2 proposal(s) pending" in captured.out
+        assert "PROPOSALS (2 pending)" in captured.out
         assert "Use SQLite" in captured.out
         assert "Max 100MB" in captured.out
         assert "DECISION" in captured.out
@@ -204,7 +203,7 @@ class TestAcceptByIds:
         cmd._accept_by_ids(pending, [proposal_id], symbols)
         captured = capsys.readouterr()
 
-        assert "Accepted" in captured.out
+        assert "ACCEPTED" in captured.out
         assert "Use SQLite" in captured.out
 
         # Verify proposal is now confirmed
@@ -224,7 +223,7 @@ class TestAcceptByIds:
         cmd._accept_by_ids(pending, [prefix], symbols)
         captured = capsys.readouterr()
 
-        assert "Accepted" in captured.out
+        assert "ACCEPTED" in captured.out
 
     def test_accepts_proposal_by_codec_alias(self, review_command, capsys):
         """Accepts proposal when given AA-BB codec alias."""
@@ -239,7 +238,7 @@ class TestAcceptByIds:
         cmd._accept_by_ids(pending, [alias], symbols)
         captured = capsys.readouterr()
 
-        assert "Accepted" in captured.out
+        assert "ACCEPTED" in captured.out
 
     def test_accepts_multiple_proposals(self, review_command, capsys):
         """Accepts multiple proposals in one call."""
@@ -254,7 +253,7 @@ class TestAcceptByIds:
         cmd._accept_by_ids(pending, [id1, id2], symbols)
         captured = capsys.readouterr()
 
-        assert "Accepted 2 proposal(s)" in captured.out
+        assert "ACCEPTED (2)" in captured.out
 
         remaining = cmd._get_pending_proposals()
         assert len(remaining) == 0
@@ -296,7 +295,7 @@ class TestAcceptAll:
         cmd._accept_all_proposals(pending, symbols)
         captured = capsys.readouterr()
 
-        assert "Accepted all 3 proposal(s)" in captured.out
+        assert "All 3 proposal(s) accepted" in captured.out
 
         remaining = cmd._get_pending_proposals()
         assert len(remaining) == 0
@@ -389,7 +388,7 @@ class TestReviewIntegration:
         cmd.review(list_only=True)
         captured = capsys.readouterr()
 
-        assert "1 proposal(s) pending" in captured.out
+        assert "PROPOSALS (1 pending)" in captured.out
         assert "Test decision" in captured.out
 
     def test_review_accept_all_confirms_all(self, review_command, capsys):
@@ -402,7 +401,7 @@ class TestReviewIntegration:
         cmd.review(accept_all=True)
         captured = capsys.readouterr()
 
-        assert "Accepted all 2 proposal(s)" in captured.out
+        assert "All 2 proposal(s) accepted" in captured.out
 
         # Verify all confirmed
         remaining = cmd._get_pending_proposals()
@@ -418,7 +417,7 @@ class TestReviewIntegration:
         cmd.review(accept_ids=[id1])
         captured = capsys.readouterr()
 
-        assert "Accepted" in captured.out
+        assert "ACCEPTED" in captured.out
         assert "Keep this" in captured.out
 
         # One should remain
@@ -447,7 +446,7 @@ class TestEdgeCases:
         cmd._list_proposals(pending, symbols)
         captured = capsys.readouterr()
 
-        assert "1 proposal(s) pending" in captured.out
+        assert "PROPOSALS (1 pending)" in captured.out
 
     def test_handles_long_summary(self, review_command, capsys):
         """Truncates very long summaries appropriately."""

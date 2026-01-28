@@ -12,10 +12,9 @@ Design: Observable by default. Every task emits timing.
 """
 
 import threading
-import time
 from collections import defaultdict
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Any
+from typing import Dict, Any
 from datetime import datetime, timezone
 
 from .task import Task, TaskResult, TaskStatus, TaskType, Priority

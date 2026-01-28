@@ -9,9 +9,8 @@ P10: Ambiguity Management
 """
 
 import pytest
-from pathlib import Path
 
-from babel.core.events import DualEventStore, Event, EventType, capture_conversation
+from babel.core.events import DualEventStore, EventType, capture_conversation
 from babel.tracking.ambiguity import (
     QuestionTracker, OpenQuestion,
     format_question, format_questions_summary,

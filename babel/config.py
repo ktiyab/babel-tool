@@ -102,6 +102,7 @@ PROVIDERS = {
         "default_model": "claude-sonnet-4-20250514",
         "models": [
             # Large / Powerful
+            "claude-opus-4-5-20251101",
             "claude-opus-4-1-20250414",
             "claude-opus-4-20250514",
             # Balanced (default)
@@ -151,15 +152,44 @@ PROVIDERS = {
     }
 }
 
-DEFAULT_PROVIDER = "claude"
+DEFAULT_REMOTE_PROVIDER = "claude"
+DEFAULT_LOCAL_PROVIDER = "ollama"
+# Backward compatibility alias
+DEFAULT_PROVIDER = DEFAULT_REMOTE_PROVIDER
 
 
 @dataclass
-class LLMConfig:
-    """LLM provider configuration."""
-    provider: str = DEFAULT_PROVIDER
+class LocalLLMConfig:
+    """Local LLM configuration (e.g., Ollama)."""
+    provider: str = DEFAULT_LOCAL_PROVIDER
+    model: str = "llama3.2"
+    base_url: str = "http://localhost:11434"
+
+    @property
+    def effective_model(self) -> str:
+        """Get model (local models are user-specified, no provider default)."""
+        return self.model
+
+    @property
+    def effective_base_url(self) -> str:
+        """Get base URL."""
+        return self.base_url
+
+    def validate(self) -> Optional[str]:
+        """Validate local config."""
+        # Local providers are dynamic - just check provider is known as local
+        provider_info = PROVIDERS.get(self.provider, {})
+        if not provider_info.get("is_local", False):
+            local_providers = [k for k, v in PROVIDERS.items() if v.get("is_local")]
+            return f"Provider '{self.provider}' is not a local provider. Valid: {', '.join(local_providers)}"
+        return None
+
+
+@dataclass
+class RemoteLLMConfig:
+    """Remote LLM configuration (Claude, OpenAI, Gemini)."""
+    provider: str = DEFAULT_REMOTE_PROVIDER
     model: Optional[str] = None  # None = use provider default
-    base_url: Optional[str] = None  # Optional override for local LLM endpoint
 
     @property
     def effective_model(self) -> str:
@@ -167,13 +197,6 @@ class LLMConfig:
         if self.model:
             return self.model
         return PROVIDERS.get(self.provider, {}).get("default_model", "")
-
-    @property
-    def effective_base_url(self) -> Optional[str]:
-        """Get base URL, falling back to provider default."""
-        if self.base_url:
-            return self.base_url
-        return PROVIDERS.get(self.provider, {}).get("default_base_url")
 
     @property
     def api_key_env(self) -> str:
@@ -188,28 +211,81 @@ class LLMConfig:
         return os.environ.get(self.api_key_env)
 
     @property
-    def is_local(self) -> bool:
-        """Check if this is a local provider (no external API)."""
-        return PROVIDERS.get(self.provider, {}).get("is_local", False)
-
-    @property
     def is_available(self) -> bool:
-        """Check if provider is configured. For local, always True (runtime check needed)."""
-        if self.is_local:
-            return True  # Local availability checked at runtime by provider
+        """Check if provider is configured (has API key)."""
         return bool(self.api_key)
 
     def validate(self) -> Optional[str]:
-        """Validate config. Returns error message or None if valid."""
+        """Validate remote config."""
+        provider_info = PROVIDERS.get(self.provider, {})
+        if provider_info.get("is_local", False):
+            remote_providers = [k for k, v in PROVIDERS.items() if not v.get("is_local")]
+            return f"Provider '{self.provider}' is not a remote provider. Valid: {', '.join(remote_providers)}"
+
         if self.provider not in PROVIDERS:
             valid = ", ".join(PROVIDERS.keys())
             return f"Unknown provider '{self.provider}'. Valid: {valid}"
 
-        # Skip model validation for local providers (models are dynamic/user-installed)
-        if self.model and not self.is_local:
-            valid_models = PROVIDERS[self.provider]["models"]
-            if self.model not in valid_models:
+        # Validate model if specified
+        if self.model:
+            valid_models = PROVIDERS[self.provider].get("models", [])
+            if valid_models and self.model not in valid_models:
                 return f"Unknown model '{self.model}' for {self.provider}. Valid: {', '.join(valid_models)}"
+
+        return None
+
+
+@dataclass
+class LLMConfig:
+    """
+    LLM configuration with separate local and remote configs.
+
+    Structure:
+        llm:
+            active: local | remote | auto
+            local:
+                provider: ollama
+                model: llama3.2
+                base_url: http://localhost:11434
+            remote:
+                provider: claude
+                model: claude-opus-4-5-20251101
+    """
+    active: str = "auto"  # "local" | "remote" | "auto"
+    local: LocalLLMConfig = field(default_factory=LocalLLMConfig)
+    remote: RemoteLLMConfig = field(default_factory=RemoteLLMConfig)
+
+    def get_active_config(self) -> tuple:
+        """
+        Get the active configuration based on 'active' setting.
+
+        Returns:
+            Tuple of (config, is_local) where config is LocalLLMConfig or RemoteLLMConfig
+        """
+        if self.active == "local":
+            return (self.local, True)
+        elif self.active == "remote":
+            return (self.remote, False)
+        else:  # auto: prefer remote if available, else local
+            if self.remote.is_available:
+                return (self.remote, False)
+            return (self.local, True)
+
+    def validate(self) -> Optional[str]:
+        """Validate config. Returns error message or None if valid."""
+        # Validate active mode
+        valid_modes = ("local", "remote", "auto")
+        if self.active not in valid_modes:
+            return f"Unknown active mode '{self.active}'. Valid: {', '.join(valid_modes)}"
+
+        # Validate nested configs
+        error = self.local.validate()
+        if error:
+            return f"Local config: {error}"
+
+        error = self.remote.validate()
+        if error:
+            return f"Remote config: {error}"
 
         return None
 
@@ -255,13 +331,20 @@ class Config:
     
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for serialization."""
-        llm_dict = {
-            "provider": self.llm.provider,
-            "model": self.llm.model
+        llm_dict: Dict[str, Any] = {
+            "active": self.llm.active,
+            "local": {
+                "provider": self.llm.local.provider,
+                "model": self.llm.local.model,
+                "base_url": self.llm.local.base_url
+            },
+            "remote": {
+                "provider": self.llm.remote.provider,
+            }
         }
-        # Only include base_url if set (for local providers)
-        if self.llm.base_url:
-            llm_dict["base_url"] = self.llm.base_url
+        # Only include remote model if explicitly set
+        if self.llm.remote.model:
+            llm_dict["remote"]["model"] = self.llm.remote.model
 
         return {
             "llm": llm_dict,
@@ -274,20 +357,75 @@ class Config:
                 "threshold": self.coherence.threshold
             }
         }
-    
+
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> 'Config':
-        """Create from dictionary."""
+        """
+        Create from dictionary.
+
+        Handles migration from old flat format:
+            Old: llm: {provider, model, base_url, mode}
+            New: llm: {active, local: {...}, remote: {...}}
+        """
         llm_data = data.get("llm", {})
         display_data = data.get("display", {})
         coherence_data = data.get("coherence", {})
 
+        # Check if this is old flat format (has 'provider' at top level, no 'local'/'remote')
+        is_old_format = "provider" in llm_data and "local" not in llm_data
+
+        if is_old_format:
+            # Migration: convert old flat format to nested
+            old_provider = llm_data.get("provider", DEFAULT_REMOTE_PROVIDER)
+            old_model = llm_data.get("model")
+            old_base_url = llm_data.get("base_url")
+            old_mode = llm_data.get("mode", "auto")
+
+            # Determine if old config was local or remote
+            provider_info = PROVIDERS.get(old_provider, {})
+            was_local = provider_info.get("is_local", False)
+
+            if was_local:
+                # Old config was for local provider
+                local_config = LocalLLMConfig(
+                    provider=old_provider,
+                    model=old_model or "llama3.2",
+                    base_url=old_base_url or "http://localhost:11434"
+                )
+                remote_config = RemoteLLMConfig()  # defaults
+            else:
+                # Old config was for remote provider
+                local_config = LocalLLMConfig()  # defaults
+                remote_config = RemoteLLMConfig(
+                    provider=old_provider,
+                    model=old_model
+                )
+
+            llm_config = LLMConfig(
+                active=old_mode,
+                local=local_config,
+                remote=remote_config
+            )
+        else:
+            # New nested format
+            local_data = llm_data.get("local", {})
+            remote_data = llm_data.get("remote", {})
+
+            llm_config = LLMConfig(
+                active=llm_data.get("active", "auto"),
+                local=LocalLLMConfig(
+                    provider=local_data.get("provider", DEFAULT_LOCAL_PROVIDER),
+                    model=local_data.get("model", "llama3.2"),
+                    base_url=local_data.get("base_url", "http://localhost:11434")
+                ),
+                remote=RemoteLLMConfig(
+                    provider=remote_data.get("provider", DEFAULT_REMOTE_PROVIDER),
+                    model=remote_data.get("model")
+                )
+            )
+
         return cls(
-            llm=LLMConfig(
-                provider=llm_data.get("provider", DEFAULT_PROVIDER),
-                model=llm_data.get("model"),
-                base_url=llm_data.get("base_url")
-            ),
+            llm=llm_config,
             display=DisplayConfig(
                 symbols=display_data.get("symbols", "auto"),
                 format=display_data.get("format", "auto")
@@ -387,14 +525,25 @@ class ConfigManager:
             except Exception:
                 pass  # Ignore malformed project config
         
-        # Layer 3: Environment overrides
-        if os.environ.get("BABEL_LLM_PROVIDER"):
-            config_data.setdefault("llm", {})["provider"] = os.environ["BABEL_LLM_PROVIDER"]
-        if os.environ.get("BABEL_LLM_MODEL"):
-            config_data.setdefault("llm", {})["model"] = os.environ["BABEL_LLM_MODEL"]
-        if os.environ.get("BABEL_LLM_BASE_URL"):
-            config_data.setdefault("llm", {})["base_url"] = os.environ["BABEL_LLM_BASE_URL"]
-        
+        # Layer 3: Environment overrides (nested structure)
+        # Active mode
+        if os.environ.get("BABEL_LLM_ACTIVE"):
+            config_data.setdefault("llm", {})["active"] = os.environ["BABEL_LLM_ACTIVE"]
+
+        # Local LLM config
+        if os.environ.get("BABEL_LLM_LOCAL_PROVIDER"):
+            config_data.setdefault("llm", {}).setdefault("local", {})["provider"] = os.environ["BABEL_LLM_LOCAL_PROVIDER"]
+        if os.environ.get("BABEL_LLM_LOCAL_MODEL"):
+            config_data.setdefault("llm", {}).setdefault("local", {})["model"] = os.environ["BABEL_LLM_LOCAL_MODEL"]
+        if os.environ.get("BABEL_LLM_LOCAL_BASE_URL"):
+            config_data.setdefault("llm", {}).setdefault("local", {})["base_url"] = os.environ["BABEL_LLM_LOCAL_BASE_URL"]
+
+        # Remote LLM config
+        if os.environ.get("BABEL_LLM_REMOTE_PROVIDER"):
+            config_data.setdefault("llm", {}).setdefault("remote", {})["provider"] = os.environ["BABEL_LLM_REMOTE_PROVIDER"]
+        if os.environ.get("BABEL_LLM_REMOTE_MODEL"):
+            config_data.setdefault("llm", {}).setdefault("remote", {})["model"] = os.environ["BABEL_LLM_REMOTE_MODEL"]
+
         self._config = Config.from_dict(config_data)
         return self._config
     
@@ -419,98 +568,142 @@ class ConfigManager:
     def set(self, key: str, value: str, scope: str = "project") -> Optional[str]:
         """
         Set a configuration value.
-        
+
         Args:
-            key: Dot-separated key (e.g., "llm.provider")
+            key: Dot-separated key (e.g., "llm.active", "llm.local.model")
             value: Value to set
             scope: "project" or "user"
-            
+
         Returns:
             Error message or None if successful
         """
         config = self.load()
-        
+
         parts = key.split(".")
-        if len(parts) != 2:
-            return f"Invalid key format: {key}. Use 'section.setting' (e.g., 'llm.provider')"
-        
-        section, setting = parts
-        
+        if len(parts) < 2 or len(parts) > 3:
+            return f"Invalid key format: {key}. Use 'section.setting' or 'llm.local.setting'"
+
+        section = parts[0]
+
         if section == "llm":
-            if setting == "provider":
-                config.llm.provider = value
-            elif setting == "model":
-                config.llm.model = value
-            elif setting == "base_url":
-                config.llm.base_url = value
-            else:
-                return f"Unknown LLM setting: {setting}. Valid: provider, model, base_url"
+            if len(parts) == 2:
+                # llm.active
+                setting = parts[1]
+                if setting == "active":
+                    config.llm.active = value
+                else:
+                    return f"Unknown LLM setting: {setting}. Valid: active, local.*, remote.*"
+            elif len(parts) == 3:
+                # llm.local.* or llm.remote.*
+                subsection, setting = parts[1], parts[2]
+                if subsection == "local":
+                    if setting == "provider":
+                        config.llm.local.provider = value
+                    elif setting == "model":
+                        config.llm.local.model = value
+                    elif setting == "base_url":
+                        config.llm.local.base_url = value
+                    else:
+                        return f"Unknown local LLM setting: {setting}. Valid: provider, model, base_url"
+                elif subsection == "remote":
+                    if setting == "provider":
+                        config.llm.remote.provider = value
+                    elif setting == "model":
+                        config.llm.remote.model = value
+                    else:
+                        return f"Unknown remote LLM setting: {setting}. Valid: provider, model"
+                else:
+                    return f"Unknown LLM subsection: {subsection}. Valid: local, remote"
             # Validate LLM config
             error = config.llm.validate()
             if error:
                 return error
-                
+
         elif section == "display":
+            if len(parts) != 2:
+                return f"Invalid display key: {key}. Use 'display.setting'"
+            setting = parts[1]
             if setting == "symbols":
                 config.display.symbols = value
             elif setting == "format":
                 config.display.format = value
             else:
                 return f"Unknown display setting: {setting}. Valid: symbols, format"
-            # Validate display config
             error = config.display.validate()
             if error:
                 return error
-                
+
         elif section == "coherence":
+            if len(parts) != 2:
+                return f"Invalid coherence key: {key}. Use 'coherence.setting'"
+            setting = parts[1]
             if setting == "auto_check":
                 config.coherence.auto_check = value.lower() in ('true', '1', 'yes')
             elif setting == "threshold":
                 config.coherence.threshold = value
             else:
                 return f"Unknown coherence setting: {setting}. Valid: auto_check, threshold"
-            # Validate coherence config
             error = config.coherence.validate()
             if error:
                 return error
         else:
             return f"Unknown section: {section}. Valid: llm, display, coherence"
-        
+
         if scope == "project":
             self.save_project(config)
         else:
             self.save_user(config)
-        
+
         return None
     
     def get(self, key: str) -> Optional[str]:
         """Get a configuration value."""
         config = self.load()
-        
+
         parts = key.split(".")
-        if len(parts) != 2:
+        if len(parts) < 2 or len(parts) > 3:
             return None
-        
-        section, setting = parts
-        
+
+        section = parts[0]
+
         if section == "llm":
-            if setting == "provider":
-                return config.llm.provider
-            elif setting == "model":
-                return config.llm.effective_model
-            elif setting == "base_url":
-                return config.llm.effective_base_url
+            if len(parts) == 2:
+                # llm.active
+                setting = parts[1]
+                if setting == "active":
+                    return config.llm.active
+            elif len(parts) == 3:
+                # llm.local.* or llm.remote.*
+                subsection, setting = parts[1], parts[2]
+                if subsection == "local":
+                    if setting == "provider":
+                        return config.llm.local.provider
+                    elif setting == "model":
+                        return config.llm.local.effective_model
+                    elif setting == "base_url":
+                        return config.llm.local.effective_base_url
+                elif subsection == "remote":
+                    if setting == "provider":
+                        return config.llm.remote.provider
+                    elif setting == "model":
+                        return config.llm.remote.effective_model
+
         elif section == "display":
-            if setting == "symbols":
-                return config.display.symbols
-            elif setting == "format":
-                return config.display.format
+            if len(parts) == 2:
+                setting = parts[1]
+                if setting == "symbols":
+                    return config.display.symbols
+                elif setting == "format":
+                    return config.display.format
+
         elif section == "coherence":
-            if setting == "auto_check":
-                return str(config.coherence.auto_check).lower()
-            elif setting == "threshold":
-                return config.coherence.threshold
-        
+            if len(parts) == 2:
+                setting = parts[1]
+                if setting == "auto_check":
+                    return str(config.coherence.auto_check).lower()
+                elif setting == "threshold":
+                    return config.coherence.threshold
+
         return None
     
     def _merge(self, base: Dict, override: Dict) -> Dict:
@@ -528,25 +721,36 @@ class ConfigManager:
         config = self.load()
         symbols = get_symbols()
 
+        # Determine which config is active
+        active_config, is_local = config.llm.get_active_config()
+        active_marker = lambda mode: f" {symbols.check_pass}" if config.llm.active == mode else ""
+
         lines = [
             "Configuration:",
             "",
-            "LLM:",
-            f"  Provider: {config.llm.provider}" + (" (local)" if config.llm.is_local else ""),
-            f"  Model: {config.llm.effective_model}",
+            f"LLM (active: {config.llm.active}):",
+            "",
+            f"  Local:{active_marker('local')}",
+            f"    Provider: {config.llm.local.provider}",
+            f"    Model: {config.llm.local.model}",
+            f"    Base URL: {config.llm.local.base_url}",
+            "",
+            f"  Remote:{active_marker('remote')}",
+            f"    Provider: {config.llm.remote.provider}",
+            f"    Model: {config.llm.remote.effective_model}",
         ]
 
-        if config.llm.is_local:
-            # Local provider: show base URL instead of API key
-            base_url = config.llm.effective_base_url or "not configured"
-            lines.append(f"  Base URL: {base_url}")
-            lines.append("  (Local LLM - no API key needed)")
-        else:
-            # Remote provider: show API key status
-            api_key_status = f"{symbols.check_pass} Set" if config.llm.api_key else f"{symbols.check_fail} Missing"
-            lines.append(f"  API Key: {api_key_status}")
-            if not config.llm.api_key:
-                lines.append(f"  (Set {config.llm.api_key_env} environment variable)")
+        # Show API key status for remote
+        api_key_status = f"{symbols.check_pass} Set" if config.llm.remote.api_key else f"{symbols.check_fail} Missing"
+        lines.append(f"    API Key: {api_key_status}")
+        if not config.llm.remote.api_key:
+            lines.append(f"    (Set {config.llm.remote.api_key_env} environment variable)")
+
+        # Show effective config when auto
+        if config.llm.active == "auto":
+            effective = "remote" if config.llm.remote.is_available else "local"
+            lines.append(f"")
+            lines.append(f"  Effective: {effective} (auto-selected)")
 
         lines.extend([
             "",

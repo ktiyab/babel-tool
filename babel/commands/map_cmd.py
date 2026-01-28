@@ -27,6 +27,7 @@ from typing import List, Dict, Optional, Tuple
 
 from ..commands.base import BaseCommand
 from ..presentation.symbols import safe_print
+from ..presentation.template import OutputTemplate
 from ..core.symbols import CodeSymbolStore
 
 
@@ -467,6 +468,7 @@ Last updated: {timestamp}
         symbols = self.symbols
         map_path = self._get_map_path()
 
+        # Progress prints (incremental feedback during generation)
         print("Generating project map (Git-native)...")
         print("  Scanning tracked files...")
         print("  Analyzing commit frequency...")
@@ -488,15 +490,20 @@ Last updated: {timestamp}
         files = self._get_tracked_files()
         hot_files = self._get_hot_files()
 
-        print(f"\n{symbols.check_pass} Map generated: {map_path}")
-        print(f"  Lines: {lines}")
-        print(f"  Tracked files: {len(files)}")
-        print(f"  Core files detected: {len(hot_files)}")
-        print(f"\nView with: babel map")
-
-        # Succession hint (centralized)
-        from ..output import end_command
-        end_command("map", {})
+        # Build output with OutputTemplate
+        template = OutputTemplate(symbols=symbols)
+        template.header("BABEL MAP", "Generated")
+        template.section("OUTPUT", f"{symbols.check_pass} Map generated: {map_path}")
+        stats_lines = [
+            f"Lines: {lines}",
+            f"Tracked files: {len(files)}",
+            f"Core files detected: {len(hot_files)}"
+        ]
+        template.section("STATS", "\n".join(stats_lines))
+        template.section("ACTION", "View with: babel map")
+        template.footer(f"{symbols.check_pass} Map ready")
+        output = template.render(command="map", context={"generated": True})
+        print(output)
 
     def update(self):
         """Incremental update (regenerates only if git has changes)."""
@@ -511,11 +518,16 @@ Last updated: {timestamp}
         has_changes, reason = self._has_changes_since_cache()
 
         if not has_changes:
-            print(f"{symbols.check_pass} Map is up to date.")
             cache = self._load_cache()
-            print(f"  Last update: {cache.get('last_update', 'unknown')}")
+            template = OutputTemplate(symbols=symbols)
+            template.header("BABEL MAP", "Up to Date")
+            template.section("STATUS", f"{symbols.check_pass} Map is up to date.")
+            template.section("LAST UPDATE", cache.get('last_update', 'unknown'))
+            output = template.render(command="map", context={"up_to_date": True})
+            print(output)
             return
 
+        # Progress prints (incremental feedback)
         print(f"Changes detected: {reason}")
         print("Regenerating map...")
 
@@ -524,55 +536,60 @@ Last updated: {timestamp}
         self._save_cache(self._load_cache())
 
         lines = content.count('\n')
-        print(f"\n{symbols.check_pass} Map updated: {map_path}")
-        print(f"  Lines: {lines}")
 
-        # Succession hint (centralized)
-        from ..output import end_command
-        end_command("map", {})
+        # Build output with OutputTemplate
+        template = OutputTemplate(symbols=symbols)
+        template.header("BABEL MAP", "Updated")
+        template.section("OUTPUT", f"{symbols.check_pass} Map updated: {map_path}")
+        template.section("STATS", f"Lines: {lines}")
+        template.footer(f"{symbols.check_pass} Map ready")
+        output = template.render(command="map", context={"updated": True})
+        print(output)
 
     def status(self):
         """Show map status."""
         symbols = self.symbols
         map_path = self._get_map_path()
 
-        print("\nProject Map Status")
-        print("=" * 40)
+        template = OutputTemplate(symbols=symbols)
+        template.header("BABEL MAP", "Status")
 
-        # Git status
+        # Git status section
         head = self._git_command(['rev-parse', '--short', 'HEAD'])
         branch = self._git_command(['branch', '--show-current'])
-        print(f"Git:     {branch or 'detached'} @ {head or 'unknown'}")
+        template.section("GIT", f"{branch or 'detached'} @ {head or 'unknown'}")
 
-        # Map status
+        # Map status section
+        status_lines = []
         if map_path.exists():
             content = map_path.read_text(encoding='utf-8')
             lines = content.count('\n')
             mtime = datetime.fromtimestamp(map_path.stat().st_mtime)
 
-            print(f"Status:  {symbols.check_pass} Exists")
-            print(f"Path:    {map_path}")
-            print(f"Size:    {lines} lines")
-            print(f"Updated: {mtime.strftime('%Y-%m-%d %H:%M')}")
+            status_lines.append(f"{symbols.check_pass} Exists")
+            status_lines.append(f"Path:    {map_path}")
+            status_lines.append(f"Size:    {lines} lines")
+            status_lines.append(f"Updated: {mtime.strftime('%Y-%m-%d %H:%M')}")
 
             # Check if up to date
             has_changes, reason = self._has_changes_since_cache()
             if has_changes:
-                print(f"Version: {symbols.check_warn} {reason}")
+                status_lines.append(f"Version: {symbols.check_warn} {reason}")
             else:
-                print(f"Version: {symbols.check_pass} Up to date")
-        else:
-            print(f"Status:  {symbols.check_fail} Not found")
-            print(f"\nGenerate with: babel map --refresh")
+                status_lines.append(f"Version: {symbols.check_pass} Up to date")
 
-        # File stats
+            template.section("STATUS", "\n".join(status_lines))
+        else:
+            template.section("STATUS", f"{symbols.check_fail} Not found")
+            template.section("ACTION", "Generate with: babel map --refresh")
+
+        # File stats section
         files = self._get_tracked_files()
         py_files = [f for f in files if f.suffix == '.py']
-        print(f"\nProject: {len(files)} tracked files ({len(py_files)} Python)")
+        template.section("PROJECT", f"{len(files)} tracked files ({len(py_files)} Python)")
 
-        # Succession hint (centralized)
-        from ..output import end_command
-        end_command("map", {})
+        output = template.render(command="map", context={"exists": map_path.exists()})
+        print(output)
 
     def init_if_missing(self) -> bool:
         """Create map if it doesn't exist."""
@@ -610,60 +627,74 @@ Last updated: {timestamp}
         symbols = self.symbols
         store = self._get_symbol_store()
 
-        if incremental:
-            print("Indexing changed files (incremental)...")
-            files, syms = store.index_changed_files()
+        files_count = 0
+        syms_count = 0
 
-            if files == 0:
-                print(f"{symbols.check_pass} Index is up to date (no changes detected).")
-            else:
-                print(f"\n{symbols.check_pass} Indexed {files} file(s), {syms} symbol(s).")
+        if incremental:
+            # Progress print (incremental feedback)
+            print("Indexing changed files (incremental)...")
+            files_count, syms_count = store.index_changed_files()
         else:
             # Whitelist principle: require explicit path to avoid indexing third-party code
             if not path:
-                print("Error: path is required for indexing.")
-                print("Use: babel map --index <path>")
+                template = OutputTemplate(symbols=symbols)
+                template.header("BABEL MAP", "Error")
+                template.section("ERROR", "Path is required for indexing.")
+                template.section("USAGE", "babel map --index <path>")
+                output = template.render(command="map", context={"error": True})
+                print(output)
                 return
 
+            # Progress print (incremental feedback)
             print(f"Indexing path: {path}")
 
-            # Build patterns for both Python and Markdown files
-            if path.endswith('.py') or path.endswith('.md'):
+            # Build patterns - respect user-specified patterns, expand plain directories
+            if '*' in path:
+                # User specified a glob pattern - use it as-is
+                patterns = [path]
+            elif path.endswith(('.py', '.md', '.ts', '.tsx', '.js', '.jsx', '.html', '.css')):
                 # Single file specified
                 patterns = [path]
             else:
-                # Directory - include both Python and Markdown
-                patterns = [
-                    f"{path}/**/*.py",
-                    f"{path}/**/*.md"
-                ]
+                # Plain directory - include all supported file types
+                patterns = [path]  # Let index_project use all registered extensions
 
-            files, syms = store.index_project(patterns=patterns)
+            files_count, syms_count = store.index_project(patterns=patterns)
 
-            print(f"\n{symbols.check_pass} Indexed {files} file(s), {syms} symbol(s).")
-
-        # Show stats
+        # Build output with OutputTemplate
         stats = store.stats()
-        print(f"\nSymbol Index:")
-        print(f"  Code:")
-        print(f"    Classes:   {stats['classes']}")
-        print(f"    Functions: {stats['functions']}")
-        print(f"    Methods:   {stats['methods']}")
+        template = OutputTemplate(symbols=symbols)
+
+        if incremental and files_count == 0:
+            template.header("BABEL MAP", "Index Up to Date")
+            template.section("STATUS", f"{symbols.check_pass} No changes detected.")
+        else:
+            template.header("BABEL MAP", "Indexed")
+            template.section("RESULT", f"{symbols.check_pass} Indexed {files_count} file(s), {syms_count} symbol(s).")
+
+        # Code stats section
+        code_lines = [
+            f"Classes:   {stats['classes']}",
+            f"Functions: {stats['functions']}",
+            f"Methods:   {stats['methods']}"
+        ]
+        template.section("CODE SYMBOLS", "\n".join(code_lines))
 
         # Show documentation stats if any
         doc_total = stats.get('documents', 0) + stats.get('sections', 0) + stats.get('subsections', 0)
         if doc_total > 0:
-            print(f"  Documentation:")
-            print(f"    Documents:   {stats.get('documents', 0)}")
-            print(f"    Sections:    {stats.get('sections', 0)}")
-            print(f"    Subsections: {stats.get('subsections', 0)}")
+            doc_lines = [
+                f"Documents:   {stats.get('documents', 0)}",
+                f"Sections:    {stats.get('sections', 0)}",
+                f"Subsections: {stats.get('subsections', 0)}"
+            ]
+            template.section("DOC SYMBOLS", "\n".join(doc_lines))
 
-        print(f"  Files:     {stats['files']}")
-        print(f"\nQuery with: babel map --query \"ClassName\" or \"SectionName\"")
-
-        # Succession hint
-        from ..output import end_command
-        end_command("map", {"indexed": True})
+        template.section("FILES", str(stats['files']))
+        template.section("ACTION", 'Query with: babel map --query "ClassName" or "SectionName"')
+        template.footer(f"{symbols.check_pass} Index ready")
+        output = template.render(command="map", context={"indexed": True})
+        print(output)
 
     def clear_symbols(self, patterns: list, exclude: str = None):
         """
@@ -680,8 +711,10 @@ Last updated: {timestamp}
 
         total_cache = 0
         total_graph = 0
+        clear_details = []
 
         for pattern in patterns:
+            # Progress prints (incremental feedback)
             print(f"Clearing symbols matching: {pattern}")
             if exclude:
                 print(f"  (excluding: {exclude})")
@@ -690,22 +723,25 @@ Last updated: {timestamp}
             total_cache += cache_cleared
             total_graph += graph_cleared
 
-            print(f"  Cache: {cache_cleared} symbols cleared")
-            print(f"  Graph: {graph_cleared} nodes deleted")
+            clear_details.append(f"{pattern}: {cache_cleared} cache, {graph_cleared} graph")
 
-        print(f"\n{symbols.check_pass} Total cleared: {total_cache} from cache, {total_graph} from graph")
+        # Build output with OutputTemplate
+        template = OutputTemplate(symbols=symbols)
+        template.header("BABEL MAP", "Symbols Cleared")
+        template.section("RESULT", f"{symbols.check_pass} Total cleared: {total_cache} from cache, {total_graph} from graph")
 
         # Show remaining stats
         stats = store.stats()
-        print(f"\nRemaining symbols:")
-        print(f"  Classes:   {stats['classes']}")
-        print(f"  Functions: {stats['functions']}")
-        print(f"  Methods:   {stats['methods']}")
-        print(f"  Files:     {stats['files']}")
-
-        # Succession hint
-        from ..output import end_command
-        end_command("map", {"cleared": True, "patterns": patterns})
+        remaining_lines = [
+            f"Classes:   {stats['classes']}",
+            f"Functions: {stats['functions']}",
+            f"Methods:   {stats['methods']}",
+            f"Files:     {stats['files']}"
+        ]
+        template.section("REMAINING", "\n".join(remaining_lines))
+        template.footer(f"{symbols.check_pass} Clear complete")
+        output = template.render(command="map", context={"cleared": True, "patterns": patterns})
+        print(output)
 
     def query_symbols(self, name: str, symbol_type: str = None):
         """
@@ -721,18 +757,41 @@ Last updated: {timestamp}
         results = store.query(name, symbol_type=symbol_type)
 
         if not results:
-            print(f"\nNo symbols found matching \"{name}\".")
-            print(f"\nBuild index with: babel map --index")
+            template = OutputTemplate(symbols=symbols)
+            template.header("BABEL MAP", "Query Results")
+            template.section("RESULT", f"No symbols found matching \"{name}\".")
+            template.section("ACTION", "Build index with: babel map --index")
+            output = template.render(command="map", context={"no_results": True})
+            print(output)
             return
 
-        print(f"\nFound {len(results)} symbol(s) matching \"{name}\":\n")
+        template = OutputTemplate(symbols=symbols)
+        template.header("BABEL MAP", f"Query: {name}")
+        template.section("FOUND", f"{len(results)} symbol(s) matching \"{name}\"")
+        output = template.render(command="map", context={"query": name, "count": len(results)})
+        print(output)
 
+        # Results listing - PRESERVE safe_print for LLM-generated content safety
         for sym in results:
             type_icon = {
                 'class': 'C',
                 'function': 'F',
                 'method': 'M',
-                'module': 'mod'
+                'module': 'mod',
+                # TypeScript symbols
+                'interface': 'I',
+                'type': 'T',
+                'enum': 'E',
+                # HTML symbols
+                'container': 'H',  # HTML container element
+                # CSS symbols
+                'id': '#',         # CSS ID selector
+                'variable': 'V',   # CSS custom property (--*)
+                'animation': 'A',  # CSS @keyframes
+                # Documentation symbols
+                'document': 'D',
+                'section': 'S',
+                'subsection': 's',
             }.get(sym.symbol_type, '?')
 
             # Format: [C] ClassName @ file.py:45-120
@@ -749,34 +808,69 @@ Last updated: {timestamp}
 
         print(f"Load specific symbol: babel gather --file {results[0].file_path} --limit {results[0].line_end - results[0].line_start + 10}")
 
-        # Succession hint
-        from ..output import end_command
-        end_command("map", {"query": name})
-
     def index_stats(self):
         """Show symbol index statistics."""
         symbols = self.symbols
         store = self._get_symbol_store()
         stats = store.stats()
 
-        print("\nSymbol Index Statistics")
-        print("=" * 40)
+        template = OutputTemplate(symbols=symbols)
+        template.header("BABEL MAP", "Symbol Index Statistics")
 
         if stats['total'] == 0:
-            print(f"Status:  {symbols.check_warn} Empty (no symbols indexed)")
-            print(f"\nBuild index with: babel map --index")
+            template.section("STATUS", f"{symbols.check_warn} Empty (no symbols indexed)")
+            template.section("ACTION", "Build index with: babel map --index")
+            output = template.render(command="map", context={"empty": True})
+            print(output)
             return
 
-        print(f"Status:  {symbols.check_pass} {stats['total']} symbols indexed")
-        print(f"\nBreakdown:")
-        print(f"  Classes:   {stats['classes']}")
-        print(f"  Functions: {stats['functions']}")
-        print(f"  Methods:   {stats['methods']}")
-        print(f"  Files:     {stats['files']}")
+        template.section("STATUS", f"{symbols.check_pass} {stats['total']} symbols indexed")
 
-        # Succession hint
-        from ..output import end_command
-        end_command("map", {"stats": True})
+        # Code symbols section
+        code_lines = [
+            f"Classes:    {stats['classes']}",
+            f"Functions:  {stats['functions']}",
+            f"Methods:    {stats['methods']}"
+        ]
+        template.section("CODE SYMBOLS", "\n".join(code_lines))
+
+        # Show TypeScript symbols if present
+        ts_total = stats.get('interfaces', 0) + stats.get('types', 0) + stats.get('enums', 0)
+        if ts_total > 0:
+            ts_lines = [
+                f"Interfaces: {stats.get('interfaces', 0)}",
+                f"Types:      {stats.get('types', 0)}",
+                f"Enums:      {stats.get('enums', 0)}"
+            ]
+            template.section("TYPESCRIPT", "\n".join(ts_lines))
+
+        # Show HTML symbols if present
+        html_total = stats.get('containers', 0)
+        if html_total > 0:
+            template.section("HTML", f"Containers: {stats.get('containers', 0)}")
+
+        # Show CSS symbols if present
+        css_total = stats.get('ids', 0) + stats.get('variables', 0) + stats.get('animations', 0)
+        if css_total > 0:
+            css_lines = [
+                f"IDs:        {stats.get('ids', 0)}",
+                f"Variables:  {stats.get('variables', 0)}",
+                f"Animations: {stats.get('animations', 0)}"
+            ]
+            template.section("CSS", "\n".join(css_lines))
+
+        # Show documentation symbols if present
+        doc_total = stats.get('documents', 0) + stats.get('sections', 0) + stats.get('subsections', 0)
+        if doc_total > 0:
+            doc_lines = [
+                f"Documents:  {stats.get('documents', 0)}",
+                f"Sections:   {stats.get('sections', 0)}"
+            ]
+            template.section("DOCUMENTATION", "\n".join(doc_lines))
+
+        template.section("FILES", str(stats['files']))
+        output = template.render(command="map", context={"stats": True})
+        print(output)
 
 
 # =============================================================================

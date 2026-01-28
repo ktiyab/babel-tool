@@ -12,14 +12,13 @@ Tests verify:
 import pytest
 import time
 import threading
-from unittest.mock import MagicMock
 
 from babel.orchestrator import (
-    TaskOrchestrator, Task, TaskType, Priority, TaskStatus, TaskResult,
-    io_task, cpu_task, get_orchestrator, reset_orchestrator
+    TaskOrchestrator, TaskType, Priority, TaskStatus, TaskResult,
+    io_task, cpu_task, reset_orchestrator,
 )
 from babel.orchestrator.config import OrchestratorConfig
-from babel.orchestrator.pools import IOPool, CPUPool, RateLimiter
+from babel.orchestrator.pools import IOPool, CPUPool
 from babel.orchestrator.scheduler import PriorityScheduler
 from babel.orchestrator.aggregator import ResultAggregator
 

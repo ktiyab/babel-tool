@@ -13,11 +13,12 @@ Artifact digests enable cheap coherence checks.
 
 import hashlib
 from datetime import datetime, timezone, timedelta
-from typing import Optional, List, Dict, Any, Tuple, TYPE_CHECKING
-from dataclasses import dataclass, field
+from typing import Optional, List, Dict, Any, TYPE_CHECKING
+from dataclasses import dataclass
 from collections import defaultdict
 
 from .events import EventStore, Event, EventType
+from ..presentation.formatters import generate_summary
 
 if TYPE_CHECKING:
     from .graph import GraphStore, Node
@@ -370,7 +371,7 @@ def _summarize_event(event: Event) -> str:
     
     elif event.type == EventType.ARTIFACT_CONFIRMED:
         atype = data.get('artifact_type', 'artifact')
-        summary = data.get('content', {}).get('summary', '')[:40]
+        summary = generate_summary(data.get('content', {}).get('summary', ''))
         return f"{atype}: {summary}"
     
     elif event.type == EventType.COMMIT_CAPTURED:

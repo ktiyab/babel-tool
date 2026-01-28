@@ -5,7 +5,6 @@ Tests checkpoint caching, incremental checks, and detection logic.
 """
 
 import pytest
-from pathlib import Path
 from datetime import datetime, timezone, timedelta
 
 from babel.core.events import EventStore, EventType, declare_purpose, confirm_artifact
@@ -13,9 +12,9 @@ from babel.core.graph import GraphStore
 from babel.config import Config
 from babel.tracking.coherence import (
     CoherenceChecker, CoherenceResult, CoherenceScope, EntityStatus,
-    format_coherence_status, format_coherence_report, _format_age
+    format_coherence_status, _format_age,
 )
-from babel.presentation.symbols import get_symbols, UNICODE, ASCII
+from babel.presentation.symbols import UNICODE, ASCII
 
 
 @pytest.fixture

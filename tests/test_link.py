@@ -16,7 +16,7 @@ Aligns with:
 """
 
 import pytest
-from unittest.mock import Mock, patch, MagicMock
+from unittest.mock import Mock, patch
 
 from babel.commands.link import LinkCommand
 from babel.core.graph import Node

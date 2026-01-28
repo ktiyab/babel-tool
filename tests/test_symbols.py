@@ -4,7 +4,6 @@ Tests for Symbols — Visual vocabulary validation
 Tests Unicode/ASCII detection and symbol formatting.
 """
 
-import pytest
 import os
 from unittest.mock import patch
 

@@ -11,15 +11,12 @@ These tests validate:
 - add_pagination_args() mixin
 """
 
-import pytest
 import argparse
 
 from babel.utils.pagination import (
     Paginator,
     add_pagination_args,
     paginate_from_args,
-    DEFAULT_LIMIT,
-    WARN_THRESHOLD
 )
 
 

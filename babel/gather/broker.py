@@ -16,12 +16,12 @@ Coherence rules:
 - Metadata/config goes first (provides context)
 """
 
-from typing import List, Dict, Optional, Tuple
+from typing import List, Dict
 from pathlib import Path
 from dataclasses import dataclass, field
 from enum import Enum
 
-from .plan import GatherPlan, GatherSource, SourceType, SourcePriority
+from .plan import GatherPlan, GatherSource, SourceType
 from .functions import estimate_file_size, estimate_grep_size
 
 

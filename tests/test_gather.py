@@ -11,12 +11,8 @@ Covers:
 - ContextTemplate rendering
 """
 
-import os
 import pytest
-import tempfile
-import time
 from pathlib import Path
-from unittest.mock import MagicMock, patch
 
 from babel.gather import (
     # Result
@@ -32,7 +28,6 @@ from babel.gather import (
     gather_bash,
     gather_glob,
     estimate_file_size,
-    estimate_grep_size,
     # Template
     ContextTemplate,
     render_context,

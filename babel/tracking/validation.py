@@ -22,15 +22,15 @@ Integration:
 
 from dataclasses import dataclass, field
 from typing import Optional, List, Dict, Any, Set
-from datetime import datetime, timezone
 from enum import Enum
 
 from ..core.events import (
-    DualEventStore, Event, EventType,
+    DualEventStore, EventType,
     endorse_decision, evidence_decision, register_decision_for_validation
 )
 from ..core.scope import EventScope
-from ..presentation.symbols import get_symbols, truncate, SUMMARY_LENGTH
+from ..presentation.formatters import generate_summary
+from ..presentation.symbols import get_symbols
 
 
 class ValidationStatus(Enum):
@@ -385,7 +385,7 @@ def format_validation_status(validation: DecisionValidation, verbose: bool = Fal
         lines.append(f"{symbols.check_pass} Evidence: {validation.evidence_count} item(s)")
         if verbose:
             for e in validation.evidence[-3:]:
-                content = truncate(e['content'], SUMMARY_LENGTH, full)
+                content = generate_summary(e['content'], full=full)
                 lines.append(f"   {symbols.bullet} {content}")
     else:
         lines.append(f"{symbols.proposed} Evidence: None provided")

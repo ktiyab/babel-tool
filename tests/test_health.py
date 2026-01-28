@@ -10,7 +10,6 @@ P9: Adaptive Cycle Rate
 """
 
 import pytest
-from pathlib import Path
 from unittest.mock import MagicMock
 
 from babel.cli import IntentCLI
@@ -323,7 +322,7 @@ class TestP11Reflexivity:
         cli.check()
         captured = capsys.readouterr()
         
-        assert "Babel Integrity Check" in captured.out
+        assert "BABEL CHECK" in captured.out
         assert ".babel/" in captured.out
     
     def test_check_reports_healthy_project(self, cli, capsys):

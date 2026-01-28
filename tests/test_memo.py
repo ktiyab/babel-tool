@@ -12,7 +12,6 @@ These tests validate:
 
 import pytest
 import json
-from pathlib import Path
 from datetime import datetime, timezone
 
 from babel.preferences import Memo, Candidate, MemoManager

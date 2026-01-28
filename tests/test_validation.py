@@ -9,9 +9,8 @@ P9: Dual-Test Truth
 """
 
 import pytest
-from pathlib import Path
 
-from babel.core.events import DualEventStore, Event, EventType
+from babel.core.events import DualEventStore, EventType
 from babel.tracking.validation import (
     ValidationTracker, ValidationStatus, DecisionValidation,
     format_validation_status, format_validation_in_context, format_validation_summary

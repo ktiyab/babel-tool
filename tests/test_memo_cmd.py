@@ -15,8 +15,7 @@ Aligns with:
 """
 
 import pytest
-from unittest.mock import Mock, patch, MagicMock
-from pathlib import Path
+from unittest.mock import Mock, patch
 
 from babel.commands.memo_cmd import MemoCommand
 from tests.factories import BabelTestFactory
@@ -78,13 +77,15 @@ class MockMemo:
         content="Test memo",
         contexts=None,
         init=False,
-        use_count=0
+        use_count=0,
+        created="2026-01-28T10:00:00Z"
     ):
         self.id = memo_id
         self.content = content
         self.contexts = contexts or []
         self.init = init
         self.use_count = use_count
+        self.created = created  # P12: Temporal attribution
 
 
 class MockCandidate:
@@ -96,7 +97,8 @@ class MockCandidate:
         contexts=None,
         count=3,
         sessions=None,
-        status="pending"
+        status="pending",
+        first_seen="2026-01-28T10:00:00Z"
     ):
         self.id = cand_id
         self.content = content
@@ -104,6 +106,7 @@ class MockCandidate:
         self.count = count
         self.sessions = sessions or ["session1", "session2"]
         self.status = status
+        self.first_seen = first_seen  # P12: Temporal attribution
 
 
 # =============================================================================

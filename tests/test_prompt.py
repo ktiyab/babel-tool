@@ -13,7 +13,7 @@ Aligns with:
 """
 
 import pytest
-from unittest.mock import Mock, patch, MagicMock
+from unittest.mock import Mock, patch
 from pathlib import Path
 
 from babel.commands.prompt import PromptCommand
@@ -276,7 +276,7 @@ class TestStatusCommand:
                                     cmd.status()
 
         captured = capsys.readouterr()
-        assert "Skills" in captured.out
+        assert "SKILLS" in captured.out
 
     def test_shows_actions(self, prompt_command, capsys):
         """Shows available actions."""
@@ -293,7 +293,7 @@ class TestStatusCommand:
                                 cmd.status()
 
         captured = capsys.readouterr()
-        assert "Actions" in captured.out
+        assert "ACTIONS" in captured.out
         assert "--install" in captured.out
 
 

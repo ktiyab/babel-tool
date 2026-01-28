@@ -12,6 +12,7 @@ import subprocess
 
 from ..commands.base import BaseCommand
 from ..services.git import GitIntegration
+from ..presentation.template import OutputTemplate
 
 
 class CheckCommand(BaseCommand):
@@ -37,18 +38,18 @@ class CheckCommand(BaseCommand):
         """
         symbols = self.symbols
 
-        print("\nBabel Integrity Check")
-        print("=" * 40)
-
+        # Collect results for structured output
+        passed = []
         issues = []
         warnings = []
+        repairs = []
 
         # Check 1: .babel directory exists
         if not self.babel_dir.exists():
             issues.append(("CRITICAL", ".babel/ directory missing",
                           "Run 'babel init' or 'git checkout .babel/'"))
         else:
-            print(f"{symbols.check_pass} .babel/ directory exists")
+            passed.append(".babel/ directory exists")
 
         # Check 2: Shared events file
         shared_path = self.babel_dir / "shared" / "events.jsonl"
@@ -56,14 +57,13 @@ class CheckCommand(BaseCommand):
             if (self.babel_dir / "shared").exists():
                 warnings.append(("WARNING", "No shared events yet",
                                "This is normal for new projects"))
-                print(f"{symbols.local} No shared events (normal for new projects)")
             else:
                 issues.append(("ERROR", ".babel/shared/ missing",
                               "Run 'git checkout .babel/shared/' or 'babel init'"))
         else:
             try:
                 shared_events = self.events.read_shared()
-                print(f"{symbols.check_pass} Shared events: {len(shared_events)} events")
+                passed.append(f"Shared events: {len(shared_events)} events")
             except Exception as e:
                 issues.append(("ERROR", f"Shared events corrupted: {e}",
                               "Restore from git: 'git checkout .babel/shared/events.jsonl'"))
@@ -73,17 +73,17 @@ class CheckCommand(BaseCommand):
         if local_path.exists():
             try:
                 local_events = self.events.read_local()
-                print(f"{symbols.check_pass} Local events: {len(local_events)} events")
+                passed.append(f"Local events: {len(local_events)} events")
             except Exception as e:
                 issues.append(("WARNING", f"Local events corrupted: {e}",
                               "Delete and start fresh: 'rm .babel/local/events.jsonl'"))
         else:
-            print(f"{symbols.local} No local events (normal)")
+            passed.append("No local events (normal)")
 
         # Check 4: Graph integrity
         try:
             stats = self.graph.stats()
-            print(f"{symbols.check_pass} Graph: {stats['nodes']} nodes, {stats['edges']} edges")
+            passed.append(f"Graph: {stats['nodes']} nodes, {stats['edges']} edges")
         except Exception as e:
             warnings.append(("WARNING", f"Graph issue: {e}",
                            "Run 'babel sync' to rebuild"))
@@ -95,7 +95,9 @@ class CheckCommand(BaseCommand):
                 warnings.append(("WARNING", f"Config: {error}",
                                "Run 'babel config' to review"))
             else:
-                print(f"{symbols.check_pass} Config: {self.config.llm.provider} ({self.config.llm.effective_model})")
+                active_config, is_local = self.config.llm.get_active_config()
+                mode = "local" if is_local else "remote"
+                passed.append(f"Config: {active_config.provider} ({active_config.effective_model}) [{mode}]")
         except Exception as e:
             warnings.append(("WARNING", f"Config issue: {e}",
                            "Run 'babel config' to review"))
@@ -106,19 +108,19 @@ class CheckCommand(BaseCommand):
             warnings.append(("WARNING", "No purpose defined",
                            "Run 'babel init \"purpose\"' to set project purpose"))
         else:
-            print(f"{symbols.check_pass} Purpose defined: {len(purposes)} purpose(s)")
+            passed.append(f"Purpose defined: {len(purposes)} purpose(s)")
 
         # Check 7: Git status
         git = GitIntegration(self.project_dir)
         if git.is_git_repo:
-            print(f"{symbols.check_pass} Git repository detected")
+            passed.append("Git repository detected")
 
             # Check 8: Gitignore protects local data
             gitignore_path = self.babel_dir / ".gitignore"
             if gitignore_path.exists():
                 content = gitignore_path.read_text()
                 if "local/" in content:
-                    print(f"{symbols.check_pass} Local data protected (.gitignore)")
+                    passed.append("Local data protected (.gitignore)")
                 else:
                     issues.append(("ERROR", "Local data NOT protected in .gitignore",
                                  "Add 'local/' to .babel/.gitignore or run with --repair"))
@@ -138,68 +140,85 @@ class CheckCommand(BaseCommand):
                     issues.append(("CRITICAL", "Local events ARE tracked in git!",
                                  "Run: git rm --cached .babel/local/ && git commit"))
                 else:
-                    print(f"{symbols.check_pass} Local data not tracked in git")
+                    passed.append("Local data not tracked in git")
             except Exception:
                 pass  # Git check failed, not critical
         else:
             warnings.append(("WARNING", "Not a git repository",
                            "Team sync requires git. Run 'git init'"))
 
-        # Summary
-        print("\n" + "-" * 40)
-
-        if issues:
-            print(f"\n{symbols.check_fail} {len(issues)} issue(s) found:\n")
-            for severity, issue, fix in issues:
-                print(f"  [{severity}] {issue}")
-                print(f"    Fix: {fix}\n")
-
-        if warnings:
-            print(f"\n{symbols.check_warn} {len(warnings)} warning(s):\n")
-            for severity, warning, fix in warnings:
-                print(f"  [{severity}] {warning}")
-                print(f"    Fix: {fix}\n")
-
-        if not issues and not warnings:
-            print(f"\n{symbols.check_pass} All checks passed. Project is healthy.")
-        elif not issues:
-            print(f"\n{symbols.check_pass} No critical issues. Project is functional.")
-
-        # Repair suggestions
+        # Handle repairs if requested
         if repair and (issues or warnings):
-            print("\nAttempting repairs...")
-            repaired = 0
-
             # Try to rebuild graph if needed
             for severity, issue, fix in issues + warnings:
                 if "Graph" in issue or "rebuild" in fix.lower():
                     try:
                         self._cli._rebuild_graph()
-                        print(f"  {symbols.check_pass} Rebuilt graph from events")
-                        repaired += 1
+                        repairs.append(f"{symbols.check_pass} Rebuilt graph from events")
                     except Exception as e:
-                        print(f"  {symbols.check_fail} Could not rebuild graph: {e}")
+                        repairs.append(f"{symbols.check_fail} Could not rebuild graph: {e}")
 
             # Fix gitignore if needed
             for severity, issue, fix in issues:
                 if ".gitignore" in issue or "Local data" in issue:
                     try:
                         self.events._ensure_gitignore()
-                        print(f"  {symbols.check_pass} Fixed .babel/.gitignore (local data now protected)")
-                        repaired += 1
+                        repairs.append(f"{symbols.check_pass} Fixed .babel/.gitignore (local data now protected)")
                     except Exception as e:
-                        print(f"  {symbols.check_fail} Could not fix .gitignore: {e}")
+                        repairs.append(f"{symbols.check_fail} Could not fix .gitignore: {e}")
 
-            if repaired > 0:
-                print(f"\nRepaired {repaired} issue(s). Run 'babel check' again to verify.")
-            else:
-                print("\nNo automatic repairs available. See manual fixes above.")
-        elif issues or warnings:
-            print("\nTip: Run 'babel check --repair' to attempt automatic fixes.")
+        # Build output with OutputTemplate
+        template = OutputTemplate(symbols=symbols)
+        template.header("BABEL CHECK", "Project Integrity Verification (P11)")
+        template.legend({
+            symbols.check_pass: "passed",
+            symbols.check_fail: "issue",
+            symbols.check_warn: "warning"
+        })
 
-        # Succession hint (centralized)
-        from ..output import end_command
-        end_command("check", {"has_issues": len(issues) > 0, "has_warnings": len(warnings) > 0})
+        # CHECKS section - passed items
+        if passed:
+            check_lines = [f"{symbols.check_pass} {item}" for item in passed]
+            template.section("CHECKS PASSED", "\n".join(check_lines))
+
+        # ISSUES section
+        if issues:
+            issue_lines = []
+            for severity, issue, fix in issues:
+                issue_lines.append(f"{symbols.check_fail} [{severity}] {issue}")
+                issue_lines.append(f"    Fix: {fix}")
+            template.section(f"ISSUES ({len(issues)})", "\n".join(issue_lines))
+
+        # WARNINGS section
+        if warnings:
+            warning_lines = []
+            for severity, warning, fix in warnings:
+                warning_lines.append(f"{symbols.check_warn} [{severity}] {warning}")
+                warning_lines.append(f"    Fix: {fix}")
+            template.section(f"WARNINGS ({len(warnings)})", "\n".join(warning_lines))
+
+        # REPAIRS section
+        if repairs:
+            template.section("REPAIRS", "\n".join(repairs))
+            if any(symbols.check_pass in r for r in repairs):
+                template.section("ACTION", "Run 'babel check' again to verify repairs")
+
+        # Footer with health status
+        if not issues and not warnings:
+            template.footer(f"{symbols.check_pass} All checks passed. Project is healthy.")
+        elif not issues:
+            template.footer(f"{symbols.check_pass} No critical issues. Project is functional.")
+        elif repair:
+            repaired_count = sum(1 for r in repairs if symbols.check_pass in r)
+            template.footer(f"Repaired {repaired_count} issue(s). Verify with: babel check")
+        else:
+            template.footer("Tip: Run 'babel check --repair' to attempt automatic fixes.")
+
+        output = template.render(command="check", context={
+            "has_issues": len(issues) > 0,
+            "has_warnings": len(warnings) > 0
+        })
+        print(output)
 
 
 # =============================================================================

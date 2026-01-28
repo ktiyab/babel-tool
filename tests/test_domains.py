@@ -8,7 +8,6 @@ P3: Authority derives from declared, bounded expertise.
 - AI role boundaries
 """
 
-import pytest
 from babel.core.domains import (
     DOMAIN_REGISTRY,
     DomainSpec,

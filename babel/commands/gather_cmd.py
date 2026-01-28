@@ -26,17 +26,13 @@ from pathlib import Path
 from ..commands.base import BaseCommand
 from ..gather import (
     GatherPlan,
-    GatherSource,
-    SourceType,
-    SourcePriority,
     ContextGatherer,
     ChunkBroker,
     ChunkStrategy,
     render_context,
-    render_to_file,
 )
 from ..gather.safety import check_bash_commands_safety, SafetyViolation
-from ..presentation.symbols import safe_print
+from ..presentation.template import OutputTemplate
 
 
 class GatherCommand(BaseCommand):
@@ -87,11 +83,16 @@ class GatherCommand(BaseCommand):
         # Validate we have at least one source
         total_sources = len(files) + len(greps) + len(bashes) + len(globs) + len(symbols_list)
         if total_sources == 0:
-            print(f"{symbols.warning} No sources specified.")
-            print("\nUsage:")
-            print("  babel gather --file src/cache.py --file src/api.py")
-            print("  babel gather --grep 'CacheError:src/' --bash 'git log -5'")
-            print("\nRun: babel gather --help")
+            template = OutputTemplate(symbols=symbols)
+            template.header("BABEL GATHER", "No Sources Specified")
+            usage_lines = [
+                "babel gather --file src/cache.py --file src/api.py",
+                "babel gather --grep 'CacheError:src/' --bash 'git log -5'"
+            ]
+            template.section("USAGE", "\n".join(usage_lines))
+            template.footer("Run: babel gather --help")
+            output = template.render(command="gather", context={"error": True})
+            print(output)
             return
 
         # Safety check: Reject unsafe babel commands in --bash
@@ -147,7 +148,11 @@ class GatherCommand(BaseCommand):
         chunks = broker.plan_chunks(plan)
 
         if not chunks:
-            print(f"{symbols.warning} No sources to gather after planning.")
+            template = OutputTemplate(symbols=symbols)
+            template.header("BABEL GATHER", "No Sources")
+            template.section("STATUS", f"{symbols.warning} No sources to gather after planning.")
+            output = template.render(command="gather", context={"empty": True})
+            print(output)
             return
 
         # Show progress for multiple chunks
@@ -183,20 +188,20 @@ class GatherCommand(BaseCommand):
         # Output result
         if output_file:
             Path(output_file).write_text(full_output, encoding="utf-8")
-            print(f"{symbols.check_pass} Context written to: {output_file}")
-            print(f"  Sources: {total_sources}")
-            print(f"  Chunks: {total_chunks}")
+            template = OutputTemplate(symbols=symbols)
+            template.header("BABEL GATHER", "Context Gathered")
+            template.section("OUTPUT", f"{symbols.check_pass} Context written to: {output_file}")
+            template.section("STATS", f"Sources: {total_sources}\nChunks: {total_chunks}")
+            template.footer(f"{symbols.check_pass} Gather complete")
+            output = template.render(command="gather", context={
+                "sources": total_sources,
+                "chunks": total_chunks,
+                "output_file": output_file,
+            })
+            print(output)
         else:
-            # Print to stdout for LLM consumption
+            # Print to stdout for LLM consumption (raw output - no template wrapping)
             print(full_output)
-
-        # Succession hint
-        from ..output import end_command
-        end_command("gather", {
-            "sources": total_sources,
-            "chunks": total_chunks,
-            "output_file": output_file,
-        })
 
 
 # =============================================================================

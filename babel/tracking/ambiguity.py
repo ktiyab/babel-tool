@@ -16,16 +16,16 @@ This module is intentionally minimal. The AI layer handles:
 - Surfacing ambiguity in conversation
 """
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Optional, List, Dict, Any
-from datetime import datetime, timezone
 
 from ..core.events import (
     DualEventStore, Event, EventType,
     raise_question, resolve_question
 )
 from ..core.scope import EventScope
-from ..presentation.symbols import get_symbols, truncate, SUMMARY_LENGTH
+from ..presentation.formatters import generate_summary, format_timestamp
+from ..presentation.symbols import get_symbols
 
 
 # =============================================================================
@@ -330,17 +330,18 @@ def format_question(question: OpenQuestion, verbose: bool = False, full: bool = 
     domain_tag = f" [{question.domain}]" if question.domain else ""
 
     lines.append(f"{status_icon} Question [{question.id[:8]}]{domain_tag}")
-    lines.append(f"  {truncate(question.content, SUMMARY_LENGTH, full)}")
+    lines.append(f"  {generate_summary(question.content, full=full)}")
 
     if verbose and question.context:
-        lines.append(f"  Context: {truncate(question.context, SUMMARY_LENGTH, full)}")
+        lines.append(f"  Context: {generate_summary(question.context, full=full)}")
 
-    lines.append(f"  By: {question.author} | {question.created_at[:10]}")
+    # P12: Time always shown
+    lines.append(f"  By: {question.author} | {format_timestamp(question.created_at)}")
 
     if question.resolution:
         r = question.resolution
         lines.append(f"  Resolved: {r['outcome']}")
-        lines.append(f"    {truncate(r['resolution'], SUMMARY_LENGTH, full)}")
+        lines.append(f"    {generate_summary(r['resolution'], full=full)}")
 
     return "\n".join(lines)
 
@@ -370,8 +371,9 @@ def format_questions_summary(tracker: QuestionTracker, full: bool = False) -> st
 
         for question in open_questions[:10]:
             domain_tag = f" [{question.domain}]" if question.domain else ""
-            age = question.created_at[:10]
-            content = truncate(question.content, SUMMARY_LENGTH, full)
+            # P12: Time always shown
+            age = format_timestamp(question.created_at)
+            content = generate_summary(question.content, full=full)
             lines.append(f"  {symbols.bullet} [{question.id[:8]}]{domain_tag} {content}")
             lines.append(f"    Raised: {age} by {question.author}")
 
@@ -394,7 +396,7 @@ def format_uncertain_decision(event: Event, full: bool = False) -> str:
         full: Show full content without truncation
     """
     data = event.data
-    content = truncate(data.get("content", ""), SUMMARY_LENGTH, full)
+    content = generate_summary(data.get("content", ""), full=full)
     reason = data.get("uncertainty_reason", "No reason given")
 
     return f"[?] UNCERTAIN: {content}\n  Reason: {reason}"

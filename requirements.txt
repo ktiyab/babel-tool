@@ -1,0 +1,23 @@
+# Babel Tool - Requirements
+# Install with: pip install -r requirements.txt
+
+# Core dependencies
+pyyaml>=6.0
+orjson>=3.9.0        # 10x faster JSON parsing for event loading
+rapidfuzz>=3.0.0     # 10-100x faster string matching for similarity
+xxhash>=3.0.0        # 5x faster hashing for task IDs and cache keys
+yake>=0.4.8          # Fast keyword extraction for semantic digests
+
+# Optional: Clean scan (code cleanup via ruff)
+ruff>=0.1.0          # Fast Python linter for unused imports, dead code
+
+# Optional: Multi-language symbol indexing (JS/TS/HTML/CSS)
+tree-sitter>=0.21.0           # AST parsing for multi-language support
+tree-sitter-language-pack>=0.1.0  # Language grammars for tree-sitter
+
+# Optional: Claude AI integration
+# anthropic>=0.18.0  # Uncomment for Claude API support
+
+# Optional: Development
+# pytest>=7.0        # Uncomment for running tests
+# pytest-cov>=4.0    # Uncomment for coverage reports

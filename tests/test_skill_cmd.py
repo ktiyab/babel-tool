@@ -13,8 +13,7 @@ Aligns with:
 """
 
 import pytest
-from unittest.mock import Mock, patch, MagicMock
-from pathlib import Path
+from unittest.mock import Mock, patch
 
 from babel.commands.skill_cmd import SkillCommand
 from babel.services.skills import SkillTarget

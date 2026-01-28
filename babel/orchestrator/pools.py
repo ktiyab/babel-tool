@@ -14,12 +14,12 @@ Design principles:
 
 import threading
 import time
-from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor, Future, TimeoutError
+from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor, Future
 from typing import Callable, Any, Optional, List
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime, timezone
 
-from .task import Task, TaskType, TaskResult, TaskStatus
+from .task import Task, TaskResult, TaskStatus
 from .config import OrchestratorConfig
 
 

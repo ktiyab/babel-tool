@@ -32,7 +32,6 @@ from babel.skills import (
     load_all_skills,
     load_protocols,
     list_skill_categories,
-    list_skills_in_category,
 )
 
 

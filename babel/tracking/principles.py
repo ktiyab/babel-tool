@@ -16,7 +16,7 @@ Uses existing trackers (validation, tensions, questions) — no direct DB access
 
 from enum import Enum
 from dataclasses import dataclass, field
-from typing import List, Optional, Dict, Any
+from typing import List, Optional
 
 
 class PrincipleStatus(Enum):

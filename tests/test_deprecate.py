@@ -13,11 +13,9 @@ Aligns with:
 """
 
 import pytest
-from unittest.mock import Mock, patch, MagicMock
-from pathlib import Path
+from unittest.mock import Mock, patch
 
 from babel.commands.deprecate import DeprecateCommand
-from babel.core.events import EventType
 from tests.factories import BabelTestFactory
 
 
@@ -239,13 +237,15 @@ class TestDeprecate:
 
         cmd._cli._resolve_node = Mock(side_effect=[old_node, new_node])
         cmd._cli.events.read_by_type = Mock(return_value=[])
-        cmd._cli.resolve_id = Mock(return_value=None)
+        # resolve_id signature: (query, candidates=None, entity_type="item")
+        # Return query passthrough when candidates is None, None when candidates provided
+        cmd._cli.resolve_id = Mock(side_effect=lambda q, c=None, e="item": q if c is None else None)
 
         with patch('babel.output.end_command'):
             cmd.deprecate("old_123", "Replaced by better approach", superseded_by="new_456")
 
         captured = capsys.readouterr()
-        assert "Superseded by" in captured.out
+        assert "SUPERSEDED BY" in captured.out
 
     def test_warns_when_replacement_not_found(self, deprecate_command, capsys):
         """Warns when superseded_by artifact not found."""
@@ -254,13 +254,15 @@ class TestDeprecate:
         old_node = MockNode("old_123", "decision", "Old")
         cmd._cli._resolve_node = Mock(side_effect=[old_node, None])
         cmd._cli.events.read_by_type = Mock(return_value=[])
-        cmd._cli.resolve_id = Mock(return_value=None)
+        # resolve_id signature: (query, candidates=None, entity_type="item")
+        # Return query passthrough when candidates is None, None when candidates provided
+        cmd._cli.resolve_id = Mock(side_effect=lambda q, c=None, e="item": q if c is None else None)
 
         with patch('babel.output.end_command'):
             cmd.deprecate("old_123", "Valid reason here", superseded_by="nonexistent")
 
         captured = capsys.readouterr()
-        assert "Warning" in captured.out
+        assert "WARNING" in captured.out
         assert "not found" in captured.out.lower()
 
     def test_creates_shared_event(self, deprecate_command):
@@ -294,7 +296,7 @@ class TestDeprecate:
             cmd.deprecate("node_abc", "Technology became obsolete")
 
         captured = capsys.readouterr()
-        assert "Lesson" in captured.out
+        assert "LESSON" in captured.out
         assert "Technology became obsolete" in captured.out
 
     def test_shows_de_prioritized_message(self, deprecate_command, capsys):
@@ -369,7 +371,7 @@ class TestEdgeCases:
         cmd.deprecate("nonexistent", "Valid reason")
 
         captured = capsys.readouterr()
-        assert "Recent decisions" in captured.out
+        assert "RECENT DECISIONS" in captured.out
 
     def test_prompts_for_reason_interactively(self, deprecate_command, capsys):
         """Prompts for reason when initial reason is too short."""

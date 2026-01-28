@@ -12,7 +12,7 @@ Aligns with:
 """
 
 import pytest
-from unittest.mock import Mock, patch, MagicMock
+from unittest.mock import Mock, patch
 from pathlib import Path
 
 from babel.commands.config_cmd import ConfigCommand
@@ -264,7 +264,7 @@ class TestSetConfig:
         cmd.set_config("test.key", "test_value", scope="project")
 
         captured = capsys.readouterr()
-        assert "Saved to" in captured.out
+        assert "SAVED TO" in captured.out
 
     def test_shows_saved_path_for_user(self, config_command, capsys):
         """Shows user config path when saved."""
@@ -273,7 +273,7 @@ class TestSetConfig:
         cmd.set_config("test.key", "test_value", scope="user")
 
         captured = capsys.readouterr()
-        assert "Saved to" in captured.out
+        assert "SAVED TO" in captured.out
 
 
 # =============================================================================

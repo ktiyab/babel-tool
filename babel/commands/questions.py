@@ -7,11 +7,12 @@ Handles acknowledged unknowns (P10: Ambiguity Management):
 - Resolving questions when evidence sufficient
 """
 
-from typing import Optional
 
 from ..commands.base import BaseCommand
 from ..core.domains import suggest_domain_for_capture, validate_domain
 from ..tracking.ambiguity import format_question, format_questions_summary
+from ..presentation.formatters import generate_summary, format_timestamp
+from ..presentation.template import OutputTemplate
 
 
 class QuestionsCommand(BaseCommand):
@@ -22,7 +23,7 @@ class QuestionsCommand(BaseCommand):
     Acknowledge what you don't know rather than forcing premature closure.
     """
 
-    def question(self, content: str, context: str = None, domain: str = None):
+    def question(self, content: str, context: str = None, domain: str = None, batch_mode: bool = False):
         """
         Raise an open question (P10: holding ambiguity is epistemic maturity).
 
@@ -30,7 +31,10 @@ class QuestionsCommand(BaseCommand):
             content: The question
             context: Why this question matters
             domain: Related expertise domain
+            batch_mode: Queue for review (AI-safe)
         """
+        symbols = self.symbols
+
         # Auto-suggest domain if not provided
         suggested_domain = None
         if not domain:
@@ -40,25 +44,36 @@ class QuestionsCommand(BaseCommand):
         if domain and not validate_domain(domain):
             print(f"Warning: Unknown domain '{domain}'. Using anyway.")
 
-        question = self.questions.raise_question(
+        question_obj = self.questions.raise_question(
             content=content,
             context=context,
             domain=domain or suggested_domain
         )
 
-        domain_tag = f" [{question.domain}]" if question.domain else ""
+        # Build template
+        template = OutputTemplate(symbols=symbols)
+        template.header("BABEL QUESTION", "P10: Ambiguity Management")
+        template.legend({
+            "?": "open question (acknowledged unknown)",
+            symbols.check_pass: "resolved"
+        })
 
-        print(f"\n? Open question raised {self._cli.format_id(question.id)}{domain_tag}")
-        print(f"  {content}")
+        domain_tag = f" [{question_obj.domain}]" if question_obj.domain else ""
+
+        question_lines = [
+            f"? Open question raised {self._cli.format_id(question_obj.id)}{domain_tag}",
+            f"  {content}"
+        ]
         if context:
-            print(f"  Context: {context}")
-        print()
-        print("This is an acknowledged unknown -- not a failure.")
-        print("Resolve when evidence is sufficient: babel resolve-question ...")
+            question_lines.append(f"  Context: {context}")
+        question_lines.append("")
+        question_lines.append("This is an acknowledged unknown — not a failure.")
 
-        # Succession hint (centralized)
-        from ..output import end_command
-        end_command("question", {})
+        template.section("QUESTION RAISED", "\n".join(question_lines))
+        template.footer(f"Resolve when evidence is sufficient → babel resolve-question {self._cli.codec.encode(question_obj.id)} \"answer\"")
+
+        output = template.render(command="question", context={})
+        print(output)
 
     def questions_cmd(self, verbose: bool = False, full: bool = False, output_format: str = None):
         """
@@ -69,25 +84,45 @@ class QuestionsCommand(BaseCommand):
             full: Show full content without truncation
             output_format: If specified, return OutputSpec for rendering
         """
+        symbols = self.symbols
+
         # If output_format specified, return OutputSpec
         if output_format:
             return self._questions_as_output(verbose, full)
 
-        # Original behavior: print directly
-        print(format_questions_summary(self.questions, full=full))
+        # Build template
+        template = OutputTemplate(symbols=symbols)
+        template.header("BABEL QUESTIONS", "P10: Acknowledged Unknowns")
+        template.legend({
+            "?": "open question",
+            symbols.check_pass: "resolved",
+            symbols.arrow: "superseded"
+        })
 
+        # Summary section
+        template.section("SUMMARY", format_questions_summary(self.questions, full=full))
+
+        # Verbose: show all open questions
         if verbose:
             open_questions = self.questions.get_open_questions()
             if open_questions:
-                print("\n" + "-" * 50)
+                question_lines = []
                 for q in open_questions:
-                    print()
-                    print(format_question(q, verbose=True, full=full))
+                    question_lines.append(format_question(q, verbose=True, full=full))
+                template.section("OPEN QUESTIONS", "\n\n".join(question_lines))
 
-        # Succession hint (centralized)
-        from ..output import end_command
+        # Footer
         has_open = self.questions.count_open() > 0
-        end_command("questions", {"has_questions": has_open, "no_questions": not has_open})
+        if has_open:
+            template.footer(f"{self.questions.count_open()} open question(s) — holding ambiguity")
+        else:
+            template.footer("No open questions — all unknowns resolved")
+
+        output = template.render(command="questions", context={
+            "has_questions": has_open,
+            "no_questions": not has_open
+        })
+        print(output)
 
     def _questions_as_output(self, verbose: bool = False, full: bool = False):
         """Return questions data as OutputSpec for rendering."""
@@ -102,10 +137,11 @@ class QuestionsCommand(BaseCommand):
 
             rows.append({
                 "id": self._cli.codec.encode(q.id),
-                "question": q.content[:50] if not full else q.content,
+                "time": format_timestamp(q.created_at),  # P12: Time always shown
+                "question": generate_summary(q.content) if not full else q.content,
                 "domain": domain_tag,
                 "status": q.status,
-                "context": (q.context[:30] if q.context else "-") if not full else (q.context or "-")
+                "context": (generate_summary(q.context) if q.context else "-") if not full else (q.context or "-")
             })
 
         title = f"Open Questions: {stats['open']}" if stats['open'] > 0 else "No open questions"
@@ -115,8 +151,8 @@ class QuestionsCommand(BaseCommand):
         return OutputSpec(
             data=rows,
             shape="table",
-            columns=["ID", "Question", "Domain", "Status", "Context"],
-            column_keys=["id", "question", "domain", "status", "context"],
+            columns=["ID", "Time", "Question", "Domain", "Status", "Context"],
+            column_keys=["id", "time", "question", "domain", "status", "context"],
             title=title,
             empty_message="No open questions. All unknowns are acknowledged and resolved."
         )
@@ -143,21 +179,37 @@ class QuestionsCommand(BaseCommand):
         resolved_id = self._cli.resolve_id(question_id, candidate_ids, "question")
         target = next((q for q in questions_list if q.id == resolved_id), None) if resolved_id else None
 
+        # Build template
+        template = OutputTemplate(symbols=symbols)
+        template.header("BABEL RESOLVE-QUESTION", "P10: Evidence Sufficient")
+        template.legend({
+            symbols.check_pass: "answered",
+            symbols.local: "dissolved (became irrelevant)",
+            symbols.arrow: "superseded (replaced)"
+        })
+
         if not target:
-            print(f"Open question not found: {question_id}")
-            print("\nOpen questions:")
+            error_lines = [f"Open question not found: {question_id}", "", "Open questions:"]
             for q in questions_list[:5]:
-                print(f"  {self._cli.format_id(q.id)} {q.content[:40]}...")
+                error_lines.append(f"  {self._cli.format_id(q.id)} {generate_summary(q.content)}")
+            template.section("ERROR", "\n".join(error_lines))
+            template.footer("Check question ID and try again")
+            print(template.render())
             return
 
         # Validate outcome
         valid_outcomes = ["answered", "dissolved", "superseded"]
         if outcome not in valid_outcomes:
-            print(f"Invalid outcome: {outcome}")
-            print(f"Valid outcomes: {', '.join(valid_outcomes)}")
-            print("  answered -- question was resolved with an answer")
-            print("  dissolved -- question became irrelevant")
-            print("  superseded -- replaced by a different question")
+            error_lines = [
+                f"Invalid outcome: {outcome}",
+                f"Valid outcomes: {', '.join(valid_outcomes)}",
+                "  answered -- question was resolved with an answer",
+                "  dissolved -- question became irrelevant",
+                "  superseded -- replaced by a different question"
+            ]
+            template.section("ERROR", "\n".join(error_lines))
+            template.footer("Use a valid outcome")
+            print(template.render())
             return
 
         success = self.questions.resolve(
@@ -174,17 +226,26 @@ class QuestionsCommand(BaseCommand):
             }
             icon = outcome_icons.get(outcome, symbols.validated)
 
-            print(f"\n{icon} Question resolved {self._cli.format_id(target.id)}")
-            print(f"  Question: {target.content[:50]}...")
-            print(f"  Outcome: {outcome}")
-            print(f"  Resolution: {resolution}")
+            resolved_lines = [
+                f"{icon} Question resolved {self._cli.format_id(target.id)}",
+                f"  Question: {generate_summary(target.content)}",
+                f"  Outcome: {outcome}",
+                f"  Resolution: {resolution}"
+            ]
+            template.section("RESOLVED", "\n".join(resolved_lines))
 
-            # Succession hint (centralized)
-            from ..output import end_command
             remaining = self.questions.count_open()
-            end_command("resolve-question", {"has_remaining": remaining > 0})
+            if remaining > 0:
+                template.footer(f"{remaining} question(s) remaining")
+            else:
+                template.footer("All questions resolved")
+
+            output = template.render(command="resolve-question", context={"has_remaining": remaining > 0})
+            print(output)
         else:
-            print("Failed to resolve question.")
+            template.section("ERROR", "Failed to resolve question.")
+            template.footer("Check question ID and try again")
+            print(template.render())
 
 
 # =============================================================================

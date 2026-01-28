@@ -19,20 +19,19 @@ Hybrid Collaboration:
 import argparse
 import atexit
 import os
-import sys
 from pathlib import Path
 from typing import Optional
 
-from .core.events import DualEventStore
+from .core.events import DualEventStore, EventType
 from .core.graph import GraphStore, Node
 from .services.extractor import Extractor
-from .config import ConfigManager, get_config, PROVIDERS
+from .config import ConfigManager
 from .services.providers import get_provider, LLMResponse
-from .services.git import GitIntegration
-from .presentation.symbols import get_symbols, format_artifact, symbol_for_type, symbol_for_status, safe_print
+from .presentation.formatters import get_node_summary, generate_summary
+from .presentation.symbols import get_symbols, safe_print
 from .tracking.coherence import CoherenceChecker
 from .core.refs import RefStore
-from .core.loader import LazyLoader, TokenBudget
+from .core.loader import LazyLoader
 from .core.vocabulary import Vocabulary
 from .services.scanner import Scanner
 from .tracking.tensions import TensionTracker
@@ -65,7 +64,7 @@ from .commands.skill_cmd import SkillCommand
 from .commands.gather_cmd import GatherCommand
 from .preferences import MemoManager
 from .content import HELP_TEXT, PRINCIPLES_TEXT
-from .orchestrator import get_orchestrator, reset_orchestrator
+from .orchestrator import get_orchestrator
 from . import __version__
 
 
@@ -478,7 +477,7 @@ class IntentCLI:
             coherence_result=coherence_result
         )
 
-    def resolve_id(self, query: str, candidates: list, entity_type: str = "item") -> str:
+    def resolve_id(self, query: str, candidates: list = None, entity_type: str = "item") -> str:
         """
         Universal ID resolution with codec alias support.
 
@@ -492,16 +491,34 @@ class IntentCLI:
 
         Args:
             query: User input (code alias, full ID, or prefix)
-            candidates: List of valid IDs to match against
+            candidates: List of valid IDs to match against (auto-gathered if None)
             entity_type: For error messages (e.g., "proposal", "memo")
 
         Returns:
             Resolved full ID, or None if not found/ambiguous
+            When candidates=None and query is alias code, returns decoded ID or original
         """
-        if not query or not candidates:
+        if not query:
             return None
 
         query = query.strip()
+
+        # Auto-gather candidates if not provided (convenience for alias-only resolution)
+        if candidates is None:
+            # Only resolve alias codes when no candidates provided
+            if not self.codec.is_short_code(query):
+                return query  # Passthrough non-alias input
+
+            # Gather candidates from events and graph nodes
+            candidates = []
+            candidates.extend(e.id for e in self.events.read_all())
+            for node_type in ["decision", "constraint", "purpose", "principle",
+                              "requirement", "boundary", "tension"]:
+                candidates.extend(n.id for n in self.graph.get_nodes_by_type(node_type))
+
+            # Decode alias and return (passthrough if not found)
+            resolved = self.codec.decode(query, candidates)
+            return resolved  # Returns original if not found
 
         # 1. Codec alias resolution (AA-BB pattern)
         if self.codec.is_short_code(query):
@@ -598,6 +615,48 @@ class IntentCLI:
                     return node
         return None
 
+    def _is_pending_proposal(self, query: str):
+        """
+        Check if query matches a pending proposal ID.
+
+        Proposals are STRUCTURE_PROPOSED events that haven't been
+        confirmed (ARTIFACT_CONFIRMED) or rejected (PROPOSAL_REJECTED).
+
+        Args:
+            query: User input (alias code, full ID, or prefix)
+
+        Returns:
+            (is_proposal, proposal_event) - True and event if pending proposal found
+        """
+        # Resolve alias code to raw ID if needed
+        resolved_query = self.resolve_id(query)
+        if not resolved_query:
+            return False, None
+
+        # Get all proposal events
+        proposed_events = self.events.read_by_type(EventType.STRUCTURE_PROPOSED)
+
+        # Get confirmed and rejected IDs
+        confirmed_events = self.events.read_by_type(EventType.ARTIFACT_CONFIRMED)
+        confirmed_ids = {e.data.get('proposal_id') for e in confirmed_events}
+
+        rejected_events = self.events.read_by_type(EventType.PROPOSAL_REJECTED)
+        rejected_ids = {e.data.get('proposal_id') for e in rejected_events}
+
+        # Check if query matches any pending proposal
+        for proposal in proposed_events:
+            if proposal.id in confirmed_ids or proposal.id in rejected_ids:
+                continue  # Not pending
+
+            # Check by full ID, prefix, or alias code
+            proposal_code = self.codec.encode(proposal.id)
+            if (proposal.id == resolved_query or
+                proposal.id.startswith(resolved_query) or
+                proposal_code == query.upper()):
+                return True, proposal
+
+        return False, None
+
     def _resolve_node(
         self,
         query: str,
@@ -633,7 +692,7 @@ class IntentCLI:
 
         if result.status == ResolveStatus.FOUND:
             node = result.node
-            summary = node.content.get('summary', str(node.content)[:50])
+            summary = generate_summary(get_node_summary(node))
             print(f"\nFound: {node.type} [{short_id(node)}]")
             # Layer 2 (Encoding): Use safe_print for LLM-generated content
             safe_print(f"  \"{summary}\"")
@@ -642,7 +701,7 @@ class IntentCLI:
         elif result.status == ResolveStatus.AMBIGUOUS:
             print(f"\nMultiple matches for \"{query}\":\n")
             for i, node in enumerate(result.candidates, 1):
-                summary = node.content.get('summary', '')[:40]
+                summary = generate_summary(get_node_summary(node))
                 # Layer 2 (Encoding): Use safe_print for LLM-generated content
                 safe_print(f"  {i}. [{short_id(node)}] {summary}")
             print(f"\nWhich one? Enter number or ID prefix:")
@@ -655,7 +714,7 @@ class IntentCLI:
                     idx = int(choice) - 1
                     if 0 <= idx < len(result.candidates):
                         node = result.candidates[idx]
-                        summary = node.content.get('summary', '')[:50]
+                        summary = generate_summary(get_node_summary(node))
                         print(f"\nFound: {node.type} [{short_id(node)}]")
                         # Layer 2 (Encoding): Use safe_print for LLM-generated content
                         safe_print(f"  \"{summary}\"")
@@ -664,7 +723,7 @@ class IntentCLI:
                 # Try as ID prefix
                 for node in result.candidates:
                     if node.id.startswith(choice) or (node.event_id and node.event_id.startswith(choice)):
-                        summary = node.content.get('summary', '')[:50]
+                        summary = generate_summary(get_node_summary(node))
                         print(f"\nFound: {node.type} [{short_id(node)}]")
                         # Layer 2 (Encoding): Use safe_print for LLM-generated content
                         safe_print(f"  \"{summary}\"")
@@ -677,11 +736,34 @@ class IntentCLI:
                 return None
 
         else:  # NOT_FOUND
+            symbols = get_symbols()
+
+            # Check if query is a pending proposal (actionable error per [CR-UZ])
+            is_proposal, proposal = self._is_pending_proposal(query)
+            if is_proposal:
+                # Extract proposal details
+                content = proposal.data.get('proposed', {})
+                artifact_type = content.get('type', 'unknown')
+                summary = content.get('summary', 'No summary')
+                proposal_code = self.format_id(proposal.id)
+
+                # Actionable error message (follows tensions pattern)
+                print(f"\n{symbols.warning} Cannot link: {proposal_code} is a pending proposal, not an accepted artifact.\n")
+                print(f"  Type: {artifact_type}")
+                # Layer 2 (Encoding): Use safe_print for LLM-generated content
+                safe_print(f"  \"{generate_summary(summary)}\"")
+                print(f"\n  Proposals must be accepted before linking.\n")
+                print(f"  {symbols.arrow} Run: babel review --accept {proposal_code}")
+                print(f"  {symbols.arrow} Then: babel link <new-id>")
+                print(f"\n  Manual: .babel/manual/link.md [LNK-03]")
+                return None
+
+            # Generic not found error (unchanged)
             print(f"\nNo match for \"{query}\".\n")
             if result.candidates:
                 print(f"Recent {type_label}s:")
                 for node in result.candidates:
-                    summary = node.content.get('summary', '')[:40]
+                    summary = generate_summary(get_node_summary(node))
                     # Layer 2 (Encoding): Use safe_print for LLM-generated content
                     safe_print(f"  [{short_id(node)}] {summary}")
             print(f"\nTry: babel <command> <id> ...")

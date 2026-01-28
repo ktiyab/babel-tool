@@ -17,7 +17,9 @@ from ..commands.base import BaseCommand
 from ..core.graph import Edge
 from ..core.commit_links import CommitLinkStore
 from ..core.symbols import CodeSymbolStore
+from ..presentation.formatters import get_node_summary, generate_summary
 from ..presentation.symbols import safe_print
+from ..presentation.template import OutputTemplate
 from ..utils.pagination import Paginator, DEFAULT_LIMIT
 
 
@@ -49,19 +51,27 @@ class LinkCommand(BaseCommand):
         symbols = self.symbols
         orphans = self.graph.find_orphans()
 
+        # Build template
+        template = OutputTemplate(symbols=symbols)
+        template.header("BABEL LINK", "Unlinked Artifacts (Orphans)")
+
         if not orphans:
-            print("No unlinked artifacts found.")
-            print("\nAll artifacts are connected to purposes.")
+            template.section("STATUS", "No unlinked artifacts found.\nAll artifacts are connected to purposes.")
+            template.footer("All artifacts coherent with purpose")
+            output = template.render(command="link", context={"has_unlinked": False})
+            print(output)
             return
+
+        template.legend({
+            symbols.check_pass: "linked",
+            symbols.arrow: "supports (relation)"
+        })
 
         # Use Paginator for consistent pagination
         if show_all:
             paginator = Paginator(orphans, limit=len(orphans) or 1, offset=0)
         else:
             paginator = Paginator(orphans, limit=limit, offset=offset)
-
-        print(f"\n{paginator.header('Unlinked artifacts')}")
-        print("(These can't inform 'babel why' queries)\n")
 
         # Group displayed items by type for clarity
         by_type = {}
@@ -71,43 +81,52 @@ class LinkCommand(BaseCommand):
                 by_type[node_type] = []
             by_type[node_type].append(node)
 
+        # Build content for each type
+        orphan_lines = [f"{paginator.header('Unlinked artifacts')}", "(These can't inform 'babel why' queries)", ""]
+
         for node_type, nodes in sorted(by_type.items()):
-            print(f"[{node_type}] ({len(nodes)})")
+            orphan_lines.append(f"[{node_type}] ({len(nodes)})")
             for node in nodes:
                 formatted_id = self._format_node_id(node)
                 if full:
                     # Show complete artifact content
-                    safe_print(f"  {formatted_id}")
+                    orphan_lines.append(f"  {formatted_id}")
                     content_str = json.dumps(node.content, indent=4, default=str)
                     for line in content_str.split('\n'):
-                        safe_print(f"    {line}")
+                        orphan_lines.append(f"    {line}")
                 else:
                     # Default: truncated summary
-                    summary = node.content.get('summary', str(node.content)[:50])[:60]
-                    safe_print(f"  {formatted_id} {summary}")
-            print()
+                    summary = generate_summary(get_node_summary(node))
+                    orphan_lines.append(f"  {formatted_id} {summary}")
+            orphan_lines.append("")
 
-        # Navigation hints
+        template.section("ORPHANS", "\n".join(orphan_lines))
+
+        # Navigation section
+        nav_lines = []
         cmd_base = "babel link --list"
 
         if paginator.has_more():
             next_offset = paginator.offset + paginator.limit
-            print(f"{symbols.arrow} Next: {cmd_base} --offset {next_offset}")
+            nav_lines.append(f"{symbols.arrow} Next: {cmd_base} --offset {next_offset}")
 
         if paginator.has_previous():
             prev_offset = max(0, paginator.offset - paginator.limit)
-            print(f"{symbols.arrow} Prev: {cmd_base} --offset {prev_offset}")
+            nav_lines.append(f"{symbols.arrow} Prev: {cmd_base} --offset {prev_offset}")
 
         if paginator.is_truncated() and not show_all:
-            print(f"{symbols.arrow} All: {cmd_base} --all")
+            nav_lines.append(f"{symbols.arrow} All: {cmd_base} --all")
 
-        print()
-        print("Link individually: babel link <id>")
-        print("Link all at once:  babel link --all")
+        nav_lines.append("")
+        nav_lines.append("Link individually: babel link <id>")
+        nav_lines.append("Link all at once:  babel link --all")
 
-        # Succession hint (centralized)
-        from ..output import end_command
-        end_command("link", {"has_unlinked": True, "total": paginator.total})
+        template.section("ACTIONS", "\n".join(nav_lines))
+
+        # Footer
+        template.footer(f"{paginator.total} unlinked artifact(s) — link to improve coherence")
+        output = template.render(command="link", context={"has_unlinked": True, "total": paginator.total})
+        print(output)
 
     def link_all(self):
         """
@@ -118,27 +137,40 @@ class LinkCommand(BaseCommand):
         """
         symbols = self.symbols
 
+        # Build template
+        template = OutputTemplate(symbols=symbols)
+        template.header("BABEL LINK", "Bulk Linking")
+        template.legend({
+            symbols.check_pass: "linked",
+            symbols.arrow: "supports (relation)"
+        })
+
         # Get active purpose
         purpose_node = self._cli._get_active_purpose()
         if not purpose_node:
-            print("No active purpose found.")
-            print("Create one with: babel init \"purpose\"")
+            template.section("ERROR", "No active purpose found.\nCreate one with: babel init \"purpose\"")
+            template.footer("Cannot link without purpose")
+            output = template.render(command="link", context={})
+            print(output)
             return
 
         # Get all orphans
         orphans = self.graph.find_orphans()
 
         if not orphans:
-            print("No unlinked artifacts to link.")
+            template.section("STATUS", "No unlinked artifacts to link.")
+            template.footer("All artifacts already coherent")
+            output = template.render(command="link", context={"has_unlinked": False})
+            print(output)
             return
 
-        purpose_summary = purpose_node.content.get('summary', purpose_node.content.get('purpose', ''))[:50]
-        print(f"\nLinking {len(orphans)} artifact(s) to purpose:")
-        safe_print(f"  {self._format_node_id(purpose_node)} \"{purpose_summary}\"")
-        print()
+        # Show target purpose
+        purpose_summary = generate_summary(get_node_summary(purpose_node))
+        template.section("TARGET PURPOSE", f"{self._format_node_id(purpose_node)} \"{purpose_summary}\"")
 
         linked_count = 0
         skipped_count = 0
+        linked_lines = []
 
         for node in orphans:
             # Skip purposes - they are root nodes, not orphans to link
@@ -169,28 +201,38 @@ class LinkCommand(BaseCommand):
                 ))
 
                 formatted_id = self._format_node_id(node)
-                summary = node.content.get('summary', '')[:40]
-                safe_print(f"  {symbols.check_pass} {formatted_id} {node.type}: {summary}")
+                summary = generate_summary(get_node_summary(node))
+                linked_lines.append(f"{symbols.check_pass} {formatted_id} {node.type}: {summary}")
                 linked_count += 1
             except ValueError:
                 # Would create cycle - skip this artifact
                 skipped_count += 1
 
-        print()
-        print(f"Linked: {linked_count} artifact(s)")
-        if skipped_count > 0:
-            print(f"Skipped: {skipped_count} (purposes or already linked)")
+        # Build linked section
+        if linked_lines:
+            template.section(f"LINKED ({linked_count})", "\n".join(linked_lines))
 
-        # Show new orphan count (O(1) lookup)
+        # Summary section
+        summary_lines = [f"Linked: {linked_count} artifact(s)"]
+        if skipped_count > 0:
+            summary_lines.append(f"Skipped: {skipped_count} (purposes or already linked)")
+
         remaining = self.graph.count_orphans()
         if remaining > 0:
-            print(f"\nRemaining unlinked: {remaining}")
+            summary_lines.append(f"Remaining unlinked: {remaining}")
         else:
-            print(f"\n{symbols.check_pass} All artifacts now linked to purpose.")
+            summary_lines.append(f"{symbols.check_pass} All artifacts now linked to purpose.")
 
-        # Succession hint (centralized)
-        from ..output import end_command
-        end_command("link", {"has_unlinked": remaining > 0})
+        template.section("SUMMARY", "\n".join(summary_lines))
+
+        # Footer
+        if remaining > 0:
+            template.footer(f"{remaining} artifact(s) still unlinked")
+        else:
+            template.footer("All artifacts coherent with purpose")
+
+        output = template.render(command="link", context={"has_unlinked": remaining > 0})
+        print(output)
 
     def link(self, artifact_id: str, purpose_id: str = None):
         """
@@ -200,10 +242,15 @@ class LinkCommand(BaseCommand):
         Unlinked artifacts show up in coherence check as needing connection.
 
         Args:
-            artifact_id: ID, prefix, or keyword to find artifact
-            purpose_id: Optional purpose ID (default: active purpose)
+            artifact_id: ID (alias code or prefix) to find artifact
+            purpose_id: Optional purpose ID (alias code or prefix, default: active purpose)
         """
         symbols = self.symbols
+
+        # Resolve alias codes to raw IDs (counterpart to format_id for output)
+        artifact_id = self._cli.resolve_id(artifact_id)
+        if purpose_id:
+            purpose_id = self._cli.resolve_id(purpose_id)
 
         # Resolve artifact using fuzzy matching
         artifact_node = self._cli._resolve_node(artifact_id, type_label="artifact")
@@ -219,16 +266,23 @@ class LinkCommand(BaseCommand):
         else:
             purpose_node = self._cli._get_active_purpose()
             if not purpose_node:
-                print("No active purpose found.")
-                print("Specify target: babel link <artifact> <purpose>")
+                template = OutputTemplate(symbols=symbols)
+                template.header("BABEL LINK", "No Active Purpose")
+                template.section("STATUS", "No active purpose found.")
+                template.section("ACTION", "Specify target: babel link <artifact> <purpose>")
 
                 # Show available purposes
                 purposes = self.graph.get_nodes_by_type('purpose')
                 if purposes:
-                    print("\nAvailable purposes:")
+                    purpose_lines = []
                     for p in purposes[-3:]:
-                        summary = p.content.get('summary', p.content.get('purpose', ''))[:50]
-                        print(f"  {self._cli.format_id(p.id)} {summary}")
+                        summary = generate_summary(get_node_summary(p))
+                        purpose_lines.append(f"  {self._cli.format_id(p.id)} {summary}")
+                    template.section("AVAILABLE PURPOSES", "\n".join(purpose_lines))
+
+                template.footer("Specify a purpose to link artifacts")
+                output = template.render(command="link", context={"no_purpose": True})
+                print(output)
                 return
 
         # Check if already linked
@@ -239,7 +293,12 @@ class LinkCommand(BaseCommand):
         )
 
         if already_linked:
-            print(f"Already linked to this purpose.")
+            template = OutputTemplate(symbols=symbols)
+            template.header("BABEL LINK", "Already Linked")
+            template.section("STATUS", "This artifact is already linked to the specified purpose.")
+            template.footer("No action needed")
+            output = template.render(command="link", context={"already_linked": True})
+            print(output)
             return
 
         # Create edge (event ID uses hex for internal identifier)
@@ -251,21 +310,29 @@ class LinkCommand(BaseCommand):
             event_id=f"link_{event_id_suffix}"
         ))
 
-        # Display confirmation
-        artifact_summary = artifact_node.content.get('summary', '')[:50]
-        purpose_summary = purpose_node.content.get('summary', purpose_node.content.get('purpose', ''))[:50]
+        # Display confirmation with OutputTemplate
+        artifact_summary = generate_summary(get_node_summary(artifact_node))
+        purpose_summary = generate_summary(get_node_summary(purpose_node))
 
-        print(f"\nLinked: {artifact_node.type} {self._cli.format_id(artifact_node.id)}")
-        print(f"  \"{artifact_summary}\"")
-        print(f"\n  {symbols.arrow} purpose {self._cli.format_id(purpose_node.id)}")
-        print(f"  \"{purpose_summary}\"")
-        print(f"\n  Relation: supports")
-        print(f"\nStatus: Now coherent with purpose.")
+        template = OutputTemplate(symbols=symbols)
+        template.header("BABEL LINK", "Artifact Linked Successfully")
+        template.legend({
+            symbols.arrow: "supports (relation)",
+            symbols.check_pass: "linked"
+        })
 
-        # Succession hint (centralized)
-        from ..output import end_command
-        remaining = self.graph.count_orphans()  # O(1) lookup
-        end_command("link", {"has_unlinked": remaining > 0})
+        artifact_line = f"[{artifact_node.type.upper()}] {self._cli.format_id(artifact_node.id)}\n  \"{artifact_summary}\""
+        template.section("ARTIFACT", artifact_line)
+
+        purpose_line = f"{symbols.arrow} {self._cli.format_id(purpose_node.id)}\n  \"{purpose_summary}\""
+        template.section("PURPOSE", purpose_line)
+
+        template.section("RELATION", "supports")
+
+        remaining = self.graph.count_orphans()
+        template.footer(f"{symbols.check_pass} Now coherent with purpose")
+        output = template.render(command="link", context={"has_unlinked": remaining > 0})
+        print(output)
 
     def link_to_commit(self, decision_id: str, commit_sha: str, linked_by: str = "user"):
         """
@@ -292,14 +359,24 @@ class LinkCommand(BaseCommand):
         git = GitIntegration()
 
         if not git.is_git_repo:
-            print("Not a git repository.")
+            template = OutputTemplate(symbols=symbols)
+            template.header("BABEL LINK", "Git Error")
+            template.section("STATUS", "Not a git repository.")
+            template.footer("Run this command from within a git repository")
+            output = template.render(command="link", context={"git_error": True})
+            print(output)
             return
 
         # Normalize commit SHA (get full hash if abbreviated)
         commit_info = git.get_commit(commit_sha, include_diff=False)
         if not commit_info:
-            print(f"Commit not found: {commit_sha}")
-            print("Use a valid commit SHA or reference (HEAD, branch name, etc.)")
+            template = OutputTemplate(symbols=symbols)
+            template.header("BABEL LINK", "Commit Not Found")
+            template.section("STATUS", f"Commit not found: {commit_sha}")
+            template.section("ACTION", "Use a valid commit SHA or reference (HEAD, branch name, etc.)")
+            template.footer("Verify commit exists with: git log --oneline")
+            output = template.render(command="link", context={"commit_not_found": True})
+            print(output)
             return
 
         full_sha = commit_info.hash
@@ -311,7 +388,12 @@ class LinkCommand(BaseCommand):
         # Check if already linked
         existing = commit_links.get_link(decision_node.event_id or decision_node.id, full_sha)
         if existing:
-            print(f"Already linked: decision {self._cli.format_id(decision_node.id)} → commit [{short_sha}]")
+            template = OutputTemplate(symbols=symbols)
+            template.header("BABEL LINK", "Already Linked")
+            template.section("STATUS", f"Decision {self._cli.format_id(decision_node.id)} is already linked to commit [{short_sha}]")
+            template.footer("No action needed")
+            output = template.render(command="link", context={"already_linked": True})
+            print(output)
             return
 
         # Create the link
@@ -322,20 +404,25 @@ class LinkCommand(BaseCommand):
             linked_by=linked_by
         )
 
-        # Display confirmation
-        decision_summary = decision_node.content.get('summary', '')[:50]
+        # Display confirmation with OutputTemplate
+        decision_summary = generate_summary(get_node_summary(decision_node))
 
-        print(f"\n{symbols.check_pass} Linked decision to commit:")
-        print(f"\n  Decision {self._cli.format_id(decision_node.id)}:")
-        safe_print(f"    \"{decision_summary}\"")
-        print(f"\n  {symbols.arrow} Commit [{short_sha}]:")
-        print(f"    \"{commit_info.message[:60]}\"")
-        print(f"\n  Relation: implements")
-        print(f"\n  Linked by: {linked_by}")
+        template = OutputTemplate(symbols=symbols)
+        template.header("BABEL LINK", "Decision Linked to Commit")
+        template.legend({
+            symbols.arrow: "implements (relation)",
+            symbols.check_pass: "linked"
+        })
 
-        # Show what this enables
-        print(f"\nThis enables:")
-        print(f"  babel why --commit {short_sha}  (see why this commit was made)")
+        decision_line = f"{self._cli.format_id(decision_node.id)}\n  \"{decision_summary}\""
+        template.section("DECISION", decision_line)
+
+        commit_line = f"[{short_sha}]\n  \"{commit_info.message[:60]}\""
+        template.section("COMMIT", commit_line)
+
+        template.section("RELATION", f"implements (by {linked_by})")
+
+        template.section("ENABLES", f"babel why --commit {short_sha}  (see why this commit was made)")
 
         # === RETURN PATH: Link decision to touched symbols ===
         # This completes the semantic bridge: WHY/HOW -> WHAT
@@ -343,13 +430,18 @@ class LinkCommand(BaseCommand):
             decision_node, git, full_sha, symbols
         )
 
-        # Succession hint
-        from ..output import end_command
-        end_command("link", {
+        if touched_symbols:
+            symbol_lines = [f"  [{sym}]" for sym in touched_symbols]
+            template.section(f"SYMBOLS ({len(touched_symbols)})", "\n".join(symbol_lines))
+
+        template.footer(f"{symbols.check_pass} Decision linked to commit" +
+                       (f" and {len(touched_symbols)} symbol(s)" if touched_symbols else ""))
+        output = template.render(command="link", context={
             "commit_linked": True,
             "commit_sha": short_sha,
             "symbols_linked": len(touched_symbols)
         })
+        print(output)
 
     def _link_decision_to_touched_symbols(self, decision_node, git, commit_sha: str, symbols) -> list:
         """
@@ -397,9 +489,7 @@ class LinkCommand(BaseCommand):
         if not symbols_to_link:
             return linked_symbols
 
-        # Create edges from decision to symbols
-        print(f"\n{symbols.arrow} Symbols touched by this commit:")
-
+        # Create edges from decision to symbols (no print - output consolidated in parent)
         for sym in symbols_to_link:
             # Find the symbol node in graph
             # Symbol nodes are created with id pattern: code_symbol_{event_id}
@@ -435,17 +525,11 @@ class LinkCommand(BaseCommand):
                     event_id=f"impl_{decision_node.id[:8]}_{symbol_node.id[:8]}"
                 ))
 
-                # Display
-                symbol_type = sym.symbol_type[0].upper()  # C=class, F=function, M=method
-                safe_print(f"  [{symbol_type}] {sym.qualified_name}")
                 linked_symbols.append(sym.qualified_name)
 
             except ValueError:
                 # Would create cycle - skip
                 pass
-
-        if linked_symbols:
-            print(f"\n{symbols.check_pass} Linked decision to {len(linked_symbols)} symbol(s)")
 
         return linked_symbols
 
@@ -460,16 +544,27 @@ class LinkCommand(BaseCommand):
         all_links = commit_links.all_links()
 
         if not all_links:
-            print("No decision-to-commit links found.")
-            print("\nCreate links with: babel link <decision_id> --to-commit <sha>")
+            template = OutputTemplate(symbols=symbols)
+            template.header("BABEL LINK", "Decision → Commit Links")
+            template.section("STATUS", "No decision-to-commit links found.")
+            template.section("ACTION", "Create links with: babel link <decision_id> --to-commit <sha>")
+            template.footer("Link decisions to commits to bridge intent with state")
+            output = template.render(command="link", context={"no_links": True})
+            print(output)
             return
 
         # Use Paginator for consistent pagination
         paginator = Paginator(all_links, limit=limit, offset=offset)
 
-        print(f"\n{paginator.header('Decision → Commit Links')}")
-        print("(Bridges intent with state)\n")
+        template = OutputTemplate(symbols=symbols)
+        template.header("BABEL LINK", f"{paginator.header('Decision → Commit Links')}")
+        template.legend({
+            symbols.arrow: "implements (relation)",
+            symbols.check_pass: "linked"
+        })
 
+        # Build link lines
+        link_lines = []
         for link in paginator.items():
             # Try to get decision summary from graph
             decision_node = self.graph.get_node(f"decision_{link.decision_id}")
@@ -482,18 +577,25 @@ class LinkCommand(BaseCommand):
                             decision_node = n
                             break
 
-            decision_summary = decision_node.content.get('summary', '')[:40] if decision_node else "(decision)"
+            decision_summary = generate_summary(get_node_summary(decision_node)) if decision_node else "(decision)"
             commit_short = link.commit_sha[:8]
 
-            safe_print(f"  {self._cli.format_id(link.decision_id)} {decision_summary}")
-            print(f"    {symbols.arrow} commit [{commit_short}] (by {link.linked_by})")
-            print()
+            link_lines.append(f"  {self._cli.format_id(link.decision_id)} {decision_summary}")
+            link_lines.append(f"    {symbols.arrow} commit [{commit_short}] (by {link.linked_by})")
+            link_lines.append("")
+
+        template.section("LINKS (Bridges Intent with State)", "\n".join(link_lines))
 
         # Navigation hints
+        nav_lines = []
         if paginator.has_more():
-            print(f"\n{symbols.arrow} More: babel link --commits --offset {paginator.offset + paginator.limit}")
+            nav_lines.append(f"{symbols.arrow} More: babel link --commits --offset {paginator.offset + paginator.limit}")
+        if nav_lines:
+            template.section("NAVIGATION", "\n".join(nav_lines))
 
-        print(f"\nTotal links: {paginator.total}")
+        template.footer(f"{paginator.total} decision-to-commit link(s)")
+        output = template.render(command="link", context={"has_links": True})
+        print(output)
 
 
 # =============================================================================

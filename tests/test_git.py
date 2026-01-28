@@ -17,10 +17,8 @@ SKIP CONDITIONS:
 import pytest
 import subprocess
 import os
-import shutil
-from pathlib import Path
 
-from babel.services.git import GitIntegration, CommitInfo, format_commit_for_extraction, POST_COMMIT_HOOK
+from babel.services.git import GitIntegration, CommitInfo, format_commit_for_extraction
 
 
 # ============================================================================

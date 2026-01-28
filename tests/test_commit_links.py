@@ -15,7 +15,6 @@ Aligns with:
 
 import pytest
 import json
-from pathlib import Path
 
 from babel.core.commit_links import CommitLink, CommitLinkStore
 

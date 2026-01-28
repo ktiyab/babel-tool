@@ -15,7 +15,7 @@ This module provides the mapping between domains, scan types, and vocabulary clu
 enabling meaningful connections across the system.
 """
 
-from typing import Optional, List, Dict, Set
+from typing import Optional, List, Dict
 from dataclasses import dataclass
 
 

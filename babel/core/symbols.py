@@ -20,20 +20,22 @@ Usage:
 """
 
 import ast
+import fnmatch
 import json
 import subprocess
-from dataclasses import dataclass, asdict, field
+from dataclasses import dataclass, asdict
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import List, Dict, Optional, Set, Tuple, Any, Union
+from typing import List, Dict, Optional, Tuple, Any, Union, Set
 
-from .events import DualEventStore, EventType, index_symbol
+from .events import DualEventStore, index_symbol
+from .tokenizer import tokenize_name, tokenize_text, token_match_score
 
 
 @dataclass
 class Symbol:
-    """A code symbol extracted via AST parsing."""
-    symbol_type: str        # "class" | "function" | "method" | "module"
+    """A code symbol extracted via AST parsing or tree-sitter."""
+    symbol_type: str        # "class" | "function" | "method" | "module" | "interface" | "type" | "enum"
     name: str               # Simple name (e.g., "CacheManager")
     qualified_name: str     # Full path (e.g., "babel.core.cache.CacheManager")
     file_path: str          # Relative path from project root
@@ -94,6 +96,50 @@ class CodeSymbolStore:
         self._cache_path = self.babel_dir / "symbol_cache.json"
         self._load_cache()
 
+        # Token index for O(1) lookup (token -> set of qualified_names)
+        self._token_index: Dict[str, set] = {}
+        self._build_token_index()
+
+        # Initialize parser registry with default language configs
+        self._registry = self._create_default_registry()
+        self._extractor = self._create_extractor()
+
+    def _create_default_registry(self) -> 'ParserRegistry':
+        """Create parser registry with default language configs."""
+        from .parsing import ParserRegistry
+        from .parsing.languages import (
+            PYTHON_CONFIG,
+            JAVASCRIPT_CONFIG,
+            TYPESCRIPT_CONFIG,
+            HTML_CONFIG,
+            CSS_CONFIG,
+        )
+
+        registry = ParserRegistry()
+        registry.register(PYTHON_CONFIG)
+        registry.register(JAVASCRIPT_CONFIG)
+        registry.register(TYPESCRIPT_CONFIG)
+        registry.register(HTML_CONFIG)
+        registry.register(CSS_CONFIG)
+        # Note: Markdown uses built-in regex parser, not tree-sitter
+        return registry
+
+    def _create_extractor(self) -> Optional['TreeSitterExtractor']:
+        """Create tree-sitter extractor if available."""
+        try:
+            from .parsing import TreeSitterExtractor
+            extractor = TreeSitterExtractor(self._registry)
+            if extractor.is_available():
+                return extractor
+        except ImportError:
+            pass
+        return None
+
+    @property
+    def registry(self) -> 'ParserRegistry':
+        """Access the parser registry for configuration."""
+        return self._registry
+
     # =========================================================================
     # Cache Management
     # =========================================================================
@@ -108,6 +154,43 @@ class CodeSymbolStore:
                     self._cache[sym.qualified_name] = sym
             except (json.JSONDecodeError, KeyError):
                 self._cache = {}
+
+    def _build_token_index(self):
+        """
+        Build inverted token index from cached symbols.
+
+        Maps each token to the set of qualified names containing that token.
+        Enables O(1) candidate lookup for token-based queries.
+        """
+        self._token_index = {}
+        for qname, sym in self._cache.items():
+            self._index_symbol_tokens(sym)
+
+    def _index_symbol_tokens(self, sym: Symbol):
+        """
+        Add a symbol's tokens to the token index.
+
+        Indexes both the simple name and qualified name.
+        """
+        # Tokenize symbol name
+        name_tokens = tokenize_name(sym.name)
+        qname_tokens = tokenize_name(sym.qualified_name)
+        all_tokens = set(name_tokens) | set(qname_tokens)
+
+        for token in all_tokens:
+            if token not in self._token_index:
+                self._token_index[token] = set()
+            self._token_index[token].add(sym.qualified_name)
+
+    def _remove_symbol_from_index(self, sym: Symbol):
+        """Remove a symbol's tokens from the index."""
+        name_tokens = tokenize_name(sym.name)
+        qname_tokens = tokenize_name(sym.qualified_name)
+        all_tokens = set(name_tokens) | set(qname_tokens)
+
+        for token in all_tokens:
+            if token in self._token_index:
+                self._token_index[token].discard(sym.qualified_name)
 
     def _save_cache(self):
         """Save symbol cache to disk."""
@@ -143,6 +226,8 @@ class CodeSymbolStore:
                 to_remove.append(qn)
 
         for qn in to_remove:
+            sym = self._cache[qn]
+            self._remove_symbol_from_index(sym)
             del self._cache[qn]
             cache_cleared += 1
 
@@ -173,6 +258,67 @@ class CodeSymbolStore:
             pass
         return None
 
+    def _find_git_root(self, start_path: Path) -> Optional[Path]:
+        """
+        Find the git repository root for a given path.
+
+        Args:
+            start_path: Starting directory to search from
+
+        Returns:
+            Path to git root, or None if not in a git repo
+        """
+        try:
+            result = subprocess.run(
+                ['git', 'rev-parse', '--show-toplevel'],
+                cwd=start_path,
+                capture_output=True,
+                text=True,
+                timeout=10
+            )
+            if result.returncode == 0:
+                return Path(result.stdout.strip())
+        except Exception:
+            pass
+        return None
+
+    def _get_tracked_files(self, extensions: set, base_dir: Path = None) -> Optional[List[Path]]:
+        """
+        Get files tracked by git, respecting .gitignore.
+
+        Uses git ls-files to get:
+        - Tracked files (--cached)
+        - Untracked but not ignored (--others --exclude-standard)
+
+        Args:
+            extensions: Set of file extensions to filter (e.g., {'.py', '.ts'})
+            base_dir: Directory to run git ls-files from (default: project_dir)
+
+        Returns:
+            List of file paths, or None if git not available (use fallback)
+        """
+        cwd = base_dir if base_dir else self.project_dir
+        try:
+            result = subprocess.run(
+                ['git', 'ls-files', '--cached', '--others', '--exclude-standard'],
+                cwd=cwd,
+                capture_output=True,
+                text=True,
+                timeout=30
+            )
+            if result.returncode == 0:
+                files = []
+                for line in result.stdout.strip().split('\n'):
+                    if not line:
+                        continue
+                    path = Path(line)
+                    if path.suffix.lower() in extensions:
+                        files.append(path)
+                return files
+        except Exception:
+            pass
+        return None  # Fall back to glob + exclusions
+
     # =========================================================================
     # AST Parsing
     # =========================================================================
@@ -192,7 +338,17 @@ class CodeSymbolStore:
             abs_path = self.project_dir / file_path
         else:
             abs_path = file_path
-            file_path = abs_path.relative_to(self.project_dir)
+            # Try to get relative path, fallback to external handling
+            try:
+                file_path = abs_path.relative_to(self.project_dir)
+            except ValueError:
+                # File is outside project - use git repo name as prefix
+                git_root = self._find_git_root(abs_path.parent)
+                if git_root:
+                    file_path = abs_path.relative_to(git_root)
+                else:
+                    # Last resort: use just the filename
+                    file_path = Path(abs_path.name)
 
         if not abs_path.exists() or not abs_path.suffix == '.py':
             return []
@@ -268,7 +424,17 @@ class CodeSymbolStore:
             abs_path = self.project_dir / file_path
         else:
             abs_path = file_path
-            file_path = abs_path.relative_to(self.project_dir)
+            # Try to get relative path, fallback to external handling
+            try:
+                file_path = abs_path.relative_to(self.project_dir)
+            except ValueError:
+                # File is outside project - use git repo name as prefix
+                git_root = self._find_git_root(abs_path.parent)
+                if git_root:
+                    file_path = abs_path.relative_to(git_root)
+                else:
+                    # Last resort: use just the filename
+                    file_path = Path(abs_path.name)
 
         if not abs_path.exists() or abs_path.suffix not in ('.md', '.markdown'):
             return []
@@ -286,7 +452,7 @@ class CodeSymbolStore:
         git_hash = self._get_git_hash() or ""
 
         # Build qualified name prefix from file path
-        # manual/link.md -> manual.link
+        # .babel/manual/link.md -> manual.link
         parts = list(file_path.with_suffix('').parts)
         doc_name = '.'.join(parts)
 
@@ -478,12 +644,11 @@ class CodeSymbolStore:
         """
         Index a single file and optionally emit events.
 
-        Dispatches to appropriate parser based on file extension:
-        - .py files -> parse_file() (AST-based Python parsing)
-        - .md files -> parse_markdown_file() (heading extraction)
+        Uses tree-sitter extractor when available, falls back to built-in parsers.
+        Supports: Python, JavaScript, TypeScript, HTML, CSS, Markdown.
 
         Args:
-            file_path: Path to file (Python or Markdown)
+            file_path: Path to file
             emit_events: Whether to emit SYMBOL_INDEXED events
 
         Returns:
@@ -493,14 +658,41 @@ class CodeSymbolStore:
         if not isinstance(file_path, Path):
             file_path = Path(file_path)
 
-        # Dispatch based on extension
         ext = file_path.suffix.lower()
-        if ext == '.py':
-            symbols = self.parse_file(file_path)
-        elif ext in ('.md', '.markdown'):
-            symbols = self.parse_markdown_file(file_path)
-        else:
-            return []  # Unsupported file type
+        symbols = []
+        git_hash = self._get_git_hash() or ""
+
+        # Try tree-sitter extractor first (supports all registered languages)
+        if self._extractor and self._registry.is_supported(file_path):
+            # Read file content
+            abs_path = file_path if file_path.is_absolute() else self.project_dir / file_path
+            if abs_path.exists():
+                try:
+                    content = abs_path.read_text(encoding='utf-8', errors='ignore')
+                    # Try to get relative path, fallback to absolute if outside project
+                    if file_path.is_absolute():
+                        try:
+                            rel_path = file_path.relative_to(self.project_dir)
+                        except ValueError:
+                            # File is outside project - use git repo name as prefix
+                            git_root = self._find_git_root(file_path.parent)
+                            if git_root:
+                                rel_path = file_path.relative_to(git_root)
+                            else:
+                                rel_path = file_path
+                    else:
+                        rel_path = file_path
+                    symbols = self._extractor.extract(rel_path, content, git_hash)
+                except Exception:
+                    symbols = []
+
+        # Fallback to built-in parsers
+        if not symbols:
+            if ext == '.py':
+                symbols = self.parse_file(file_path)
+            elif ext in ('.md', '.markdown'):
+                symbols = self.parse_markdown_file(file_path)
+            # Note: JS/TS only supported via tree-sitter, no fallback
 
         if emit_events:
             for sym in symbols:
@@ -522,50 +714,155 @@ class CodeSymbolStore:
                 # Project into graph
                 self.graph._project_event(event, auto_commit=True)
 
-                # Update cache
+                # Update cache and token index
                 self._cache[sym.qualified_name] = sym
+                self._index_symbol_tokens(sym)
 
         return symbols
+
+    def _resolve_pattern_base(self, pattern: str) -> Tuple[Path, str]:
+        """
+        Extract the base directory and remaining pattern from a glob pattern.
+
+        Args:
+            pattern: Glob pattern (e.g., "../babel-dashboard/**/*.py")
+
+        Returns:
+            Tuple of (base_dir, relative_pattern)
+        """
+        # Split pattern at first wildcard
+        parts = pattern.split('*', 1)
+        base_str = parts[0].rstrip('/')
+
+        if not base_str:
+            return self.project_dir, pattern
+
+        # Resolve base path - use CWD for relative paths (patterns come from command line)
+        base_path = Path(base_str)
+        if not base_path.is_absolute():
+            # Relative patterns are relative to CWD, not project_dir
+            base_path = Path.cwd() / base_path
+
+        # Find the actual directory (go up until we find an existing dir)
+        while not base_path.exists() and base_path != base_path.parent:
+            base_path = base_path.parent
+
+        if base_path.is_file():
+            base_path = base_path.parent
+
+        # Calculate remaining pattern relative to base
+        if len(parts) > 1:
+            rel_pattern = '*' + parts[1]
+        else:
+            rel_pattern = '**/*'
+
+        return base_path.resolve(), rel_pattern
 
     def index_project(
         self,
         patterns: List[str] = None,
-        exclude: List[str] = None
+        exclude: List[str] = None,
+        respect_gitignore: bool = True
     ) -> Tuple[int, int]:
         """
-        Index all Python files in the project.
+        Index files in the project.
+
+        Supports all registered languages (Python, JavaScript, TypeScript, Markdown).
+        Respects .gitignore by default using git ls-files.
+        Handles patterns pointing to external git repositories.
 
         Args:
-            patterns: Glob patterns to include (default: ["**/*.py"])
-            exclude: Patterns to exclude (default: ["**/test_*", "**/__pycache__/*"])
+            patterns: Glob patterns to include (default: uses registry patterns)
+            exclude: Patterns to exclude (default: uses registry exclusions)
+            respect_gitignore: Use git ls-files to respect .gitignore (default: True)
 
         Returns:
             Tuple of (files_indexed, symbols_indexed)
         """
-        patterns = patterns or ["**/*.py"]
-        exclude = exclude or ["**/test_*", "**/__pycache__/*", "**/.*"]
-
         files_indexed = 0
         symbols_indexed = 0
 
-        for pattern in patterns:
-            for file_path in self.project_dir.glob(pattern):
-                # Skip excluded patterns
-                rel_path = file_path.relative_to(self.project_dir)
-                if any(rel_path.match(ex) for ex in exclude):
-                    continue
+        # Build set of extensions to index
+        extensions = set(self._registry.supported_extensions())
+        extensions.update({'.md', '.markdown'})  # Always include markdown
 
-                symbols = self.index_file(rel_path)
-                if symbols:
-                    files_indexed += 1
-                    symbols_indexed += len(symbols)
+        if patterns:
+            # Process each pattern - may point to different git repos
+            for pattern in patterns:
+                base_dir, rel_pattern = self._resolve_pattern_base(pattern)
+
+                # Get tracked files from the pattern's git root
+                tracked_files = None
+                if respect_gitignore:
+                    git_root = self._find_git_root(base_dir)
+                    if git_root:
+                        tracked_files = self._get_tracked_files(extensions, git_root)
+
+                if tracked_files is not None:
+                    # Files are relative to git_root - convert to absolute and filter by pattern
+                    for file_path in tracked_files:
+                        abs_path = git_root / file_path
+                        # Check if file is within our base_dir
+                        try:
+                            abs_path.relative_to(base_dir)
+                        except ValueError:
+                            continue  # File not under base_dir
+
+                        # Check extension
+                        if abs_path.suffix.lower() not in extensions:
+                            continue
+
+                        # Check pattern match
+                        if not abs_path.match(rel_pattern) and not fnmatch.fnmatch(abs_path.name, rel_pattern):
+                            # Try matching against the original pattern
+                            rel_to_project = abs_path.relative_to(self.project_dir.parent) if abs_path.is_relative_to(self.project_dir.parent) else abs_path
+                            if not fnmatch.fnmatch(str(rel_to_project), pattern.lstrip('./')):
+                                continue
+
+                        symbols = self.index_file(abs_path)
+                        if symbols:
+                            files_indexed += 1
+                            symbols_indexed += len(symbols)
+                else:
+                    # Fallback: glob from base_dir
+                    for file_path in base_dir.glob(rel_pattern):
+                        if file_path.suffix.lower() not in extensions:
+                            continue
+                        if exclude and any(file_path.match(ex) for ex in exclude):
+                            continue
+                        symbols = self.index_file(file_path)
+                        if symbols:
+                            files_indexed += 1
+                            symbols_indexed += len(symbols)
+        else:
+            # Fallback: glob + exclusion patterns (no git or git failed)
+            if patterns is None:
+                patterns = self._registry.glob_patterns_for_indexing()
+                patterns.append("**/*.md")
+
+            if exclude is None:
+                exclude = self._registry.all_exclude_patterns()
+                exclude.extend(["**/.*"])
+
+            for pattern in patterns:
+                for file_path in self.project_dir.glob(pattern):
+                    rel_path = file_path.relative_to(self.project_dir)
+                    if any(rel_path.match(ex) for ex in exclude):
+                        continue
+
+                    symbols = self.index_file(rel_path)
+                    if symbols:
+                        files_indexed += 1
+                        symbols_indexed += len(symbols)
 
         self._save_cache()
         return files_indexed, symbols_indexed
 
     def get_changed_files(self, since_hash: str = None) -> List[Path]:
         """
-        Get Python files changed since a commit.
+        Get supported files changed since a commit.
+
+        Includes all file types registered in the parser registry.
 
         Args:
             since_hash: Commit hash to compare from (default: use cached hash)
@@ -586,9 +883,15 @@ class CodeSymbolStore:
         if not since_hash:
             return []  # No baseline, need full index
 
+        # Build file patterns for all supported extensions
+        extensions = list(self._registry.supported_extensions())
+        extensions.append('.md')  # Always include markdown
+        file_patterns = [f'*{ext}' for ext in extensions]
+
         try:
+            cmd = ['git', 'diff', '--name-only', since_hash, 'HEAD', '--'] + file_patterns
             result = subprocess.run(
-                ['git', 'diff', '--name-only', since_hash, 'HEAD', '--', '*.py'],
+                cmd,
                 cwd=self.project_dir,
                 capture_output=True,
                 text=True,
@@ -617,9 +920,11 @@ class CodeSymbolStore:
         symbols_indexed = 0
 
         for file_path in changed:
-            # Remove old symbols for this file from cache
+            # Remove old symbols for this file from cache and token index
             to_remove = [qn for qn, sym in self._cache.items() if sym.file_path == str(file_path)]
             for qn in to_remove:
+                sym = self._cache[qn]
+                self._remove_symbol_from_index(sym)
                 del self._cache[qn]
 
             # Re-index if file still exists
@@ -639,51 +944,150 @@ class CodeSymbolStore:
 
     def query(self, name: str, symbol_type: str = None) -> List[Symbol]:
         """
-        Query symbols by name.
+        Query symbols by name using token-based matching.
+
+        Supports cross-convention matching:
+        - "user profile" matches UserProfile, user_profile, user-profile
+        - Exact matches scored highest, token matches next
+
+        Uses token index for O(1) candidate lookup when available.
 
         Args:
-            name: Symbol name (simple or qualified)
+            name: Symbol name, query string, or keywords
             symbol_type: Optional filter by type
 
         Returns:
-            List of matching symbols
+            List of matching symbols, sorted by relevance
         """
-        results = []
+        scored_results: List[Tuple[float, Symbol]] = []
+        seen_qnames = set()
         name_lower = name.lower()
+        query_tokens = tokenize_text(name)
 
-        for sym in self._cache.values():
-            # Match simple name or qualified name
-            if sym.name.lower() == name_lower or sym.qualified_name.lower().endswith(name_lower):
-                if symbol_type is None or sym.symbol_type == symbol_type:
-                    results.append(sym)
+        # Get candidates from token index (O(1) per token)
+        candidate_qnames = self._get_candidates_from_index(query_tokens)
+
+        # Search cache - use candidates if available, else full scan
+        symbols_to_check = (
+            (self._cache[qn] for qn in candidate_qnames if qn in self._cache)
+            if candidate_qnames
+            else self._cache.values()
+        )
+
+        for sym in symbols_to_check:
+            if symbol_type is not None and sym.symbol_type != symbol_type:
+                continue
+
+            score = self._score_symbol_match(sym.name, sym.qualified_name, name_lower, query_tokens)
+            if score > 0:
+                scored_results.append((score, sym))
+                seen_qnames.add(sym.qualified_name)
 
         # Also search graph for more complete results
         code_symbols = self.graph.get_nodes_by_type("code_symbol")
         for node in code_symbols:
             content = node.content
-            node_name = content.get('name', '').lower()
-            node_qname = content.get('qualified_name', '').lower()
+            qname = content.get('qualified_name', '')
 
-            if node_name == name_lower or node_qname.endswith(name_lower):
-                if symbol_type is None or content.get('symbol_type') == symbol_type:
-                    # Check if already in results
-                    qname = content.get('qualified_name')
-                    if not any(s.qualified_name == qname for s in results):
-                        results.append(Symbol(
-                            symbol_type=content.get('symbol_type', ''),
-                            name=content.get('name', ''),
-                            qualified_name=qname,
-                            file_path=content.get('file_path', ''),
-                            line_start=content.get('line_start', 0),
-                            line_end=content.get('line_end', 0),
-                            signature=content.get('signature', ''),
-                            docstring=content.get('docstring', ''),
-                            visibility=content.get('visibility', 'public'),
-                            git_hash=content.get('git_hash', ''),
-                            event_id=node.event_id
-                        ))
+            if qname in seen_qnames:
+                continue
 
-        return results
+            if symbol_type is not None and content.get('symbol_type') != symbol_type:
+                continue
+
+            node_name = content.get('name', '')
+            score = self._score_symbol_match(node_name, qname, name_lower, query_tokens)
+
+            if score > 0:
+                seen_qnames.add(qname)
+                sym = Symbol(
+                    symbol_type=content.get('symbol_type', ''),
+                    name=node_name,
+                    qualified_name=qname,
+                    file_path=content.get('file_path', ''),
+                    line_start=content.get('line_start', 0),
+                    line_end=content.get('line_end', 0),
+                    signature=content.get('signature', ''),
+                    docstring=content.get('docstring', ''),
+                    visibility=content.get('visibility', 'public'),
+                    git_hash=content.get('git_hash', ''),
+                    event_id=node.event_id
+                )
+                scored_results.append((score, sym))
+
+        # Sort by score descending, return symbols only
+        scored_results.sort(key=lambda x: x[0], reverse=True)
+        return [sym for _, sym in scored_results]
+
+    def _get_candidates_from_index(self, query_tokens: set) -> Optional[set]:
+        """
+        Get candidate qualified names from the token index.
+
+        Returns the union of all symbols containing ANY query token.
+        Returns None if index is empty (fall back to full scan).
+
+        Args:
+            query_tokens: Set of tokens from the query
+
+        Returns:
+            Set of qualified names, or None if no index
+        """
+        if not self._token_index or not query_tokens:
+            return None
+
+        candidates = set()
+        for token in query_tokens:
+            if token in self._token_index:
+                candidates |= self._token_index[token]
+
+        return candidates if candidates else None
+
+    def _score_symbol_match(
+        self,
+        name: str,
+        qualified_name: str,
+        query_lower: str,
+        query_tokens: set
+    ) -> float:
+        """
+        Score how well a symbol matches a query.
+
+        Scoring:
+        - Exact name match: 10.0 (highest priority)
+        - Qualified name ends with query: 8.0
+        - Token-based match: 1.0 per matching token + 0.5 for partials
+
+        Args:
+            name: Symbol's simple name
+            qualified_name: Symbol's qualified name
+            query_lower: Lowercased query string
+            query_tokens: Tokenized query
+
+        Returns:
+            Match score (0 = no match)
+        """
+        name_lower = name.lower()
+        qname_lower = qualified_name.lower()
+
+        # Exact match on simple name - highest priority
+        if name_lower == query_lower:
+            return 10.0
+
+        # Qualified name ends with query
+        if qname_lower.endswith(query_lower):
+            return 8.0
+
+        # Token-based matching
+        if query_tokens:
+            score = token_match_score(query_tokens, name)
+            # Also check qualified name for path-based tokens
+            qname_score = token_match_score(query_tokens, qualified_name)
+            score = max(score, qname_score * 0.8)  # Slight penalty for qname-only match
+
+            if score > 0:
+                return score
+
+        return 0.0
 
     def get_symbol(self, qualified_name: str) -> Optional[Symbol]:
         """Get symbol by exact qualified name."""
@@ -701,13 +1105,26 @@ class CodeSymbolStore:
 
         return {
             'total': len(self._cache),
-            # Code symbols
+            # Code symbols (all languages)
             'classes': by_type.get('class', 0),
             'functions': by_type.get('function', 0),
             'methods': by_type.get('method', 0),
+            # TypeScript-specific symbols
+            'interfaces': by_type.get('interface', 0),
+            'types': by_type.get('type', 0),
+            'enums': by_type.get('enum', 0),
+            # HTML symbols
+            'containers': by_type.get('container', 0),
+            # CSS symbols
+            'ids': by_type.get('id', 0),
+            'variables': by_type.get('variable', 0),
+            'animations': by_type.get('animation', 0),
             # Documentation symbols
             'documents': by_type.get('document', 0),
             'sections': by_type.get('section', 0),
             'subsections': by_type.get('subsection', 0),
-            'files': len(set(sym.file_path for sym in self._cache.values()))
+            # File count
+            'files': len(set(sym.file_path for sym in self._cache.values())),
+            # Token index stats
+            'unique_tokens': len(self._token_index),
         }

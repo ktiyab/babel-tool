@@ -14,7 +14,7 @@ Aligns with:
 """
 
 import pytest
-from unittest.mock import Mock, patch
+from unittest.mock import Mock
 
 from babel.commands.history import HistoryCommand
 from babel.core.events import EventType
@@ -214,20 +214,20 @@ class TestShare:
             captured = capsys.readouterr()
             assert "already shared" in captured.out.lower()
 
-    def test_handles_multiple_matches(self, history_command, capsys):
-        """Handles ambiguous ID prefix with multiple matches."""
+    def test_handles_nonexistent_id(self, history_command, capsys):
+        """Handles ID that doesn't exist."""
         cmd, factory = history_command
 
-        # Add multiple events - they'll have different IDs
+        # Add some events
         factory.add_decision(summary="Decision 1")
         factory.add_decision(summary="Decision 2")
 
-        # Use very short prefix that might match multiple
-        cmd.share("a")  # Unlikely to match in practice
+        # Use a prefix that won't match any SHA256 hex ID (uses 'z' which isn't in hex)
+        cmd.share("zzzzzz")
 
         captured = capsys.readouterr()
-        # Either not found or multiple matches
-        assert "not found" in captured.out.lower() or "specific" in captured.out.lower()
+        # Should report not found
+        assert "not found" in captured.out.lower() or "no artifact" in captured.out.lower()
 
 
 # =============================================================================
@@ -423,9 +423,10 @@ class TestHistoryOutput:
 
         assert len(result.data) > 0
         # Each row should have expected keys
+        # P12: "date" renamed to "time" for temporal attribution
         for row in result.data:
             assert "scope" in row
-            assert "date" in row
+            assert "time" in row
             assert "id" in row
 
 

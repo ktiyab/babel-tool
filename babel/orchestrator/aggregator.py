@@ -14,11 +14,11 @@ This ensures HC1 (append-only) compliance:
 
 import threading
 import queue
-from typing import List, Dict, Any, Callable, Optional
-from dataclasses import dataclass, field
+from typing import List, Dict, Callable, Optional
+from dataclasses import dataclass
 from datetime import datetime, timezone
 
-from .task import TaskResult, TaskStatus
+from .task import TaskResult
 
 
 @dataclass

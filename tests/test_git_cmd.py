@@ -13,11 +13,9 @@ Aligns with:
 """
 
 import pytest
-from unittest.mock import Mock, patch, MagicMock
-from pathlib import Path
+from unittest.mock import Mock, patch
 
 from babel.commands.git_cmd import GitCommand
-from babel.core.events import EventType
 from tests.factories import BabelTestFactory
 
 

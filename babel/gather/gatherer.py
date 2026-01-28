@@ -21,7 +21,6 @@ Usage:
 """
 
 from typing import List, Optional, Dict, Callable
-from concurrent.futures import Future
 
 from .plan import GatherPlan, GatherSource, SourceType
 from .result import GatherResult

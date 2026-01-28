@@ -11,8 +11,7 @@ Commands:
     babel skill list                List available skills
 """
 
-from pathlib import Path
-from typing import List, Optional
+from typing import List
 
 from ..services.skills import (
     SkillTarget,
@@ -22,13 +21,14 @@ from ..services.skills import (
     get_skills_status,
     format_skills_status,
     detect_active_platforms,
-    SKILL_TARGET_PATHS,
 )
 from ..skills import (
     load_all_skills,
     load_protocols,
     SkillCategory,
 )
+from ..presentation.template import OutputTemplate
+from ..presentation.symbols import get_symbols
 
 
 class SkillCommand:
@@ -75,26 +75,47 @@ class SkillCommand:
 
         # Export
         result = export_skills(self.project_dir, skill_target, force=force)
+        symbols = get_symbols()
+        template = OutputTemplate(symbols=symbols)
 
         if result.success:
-            print(f"\n✓ {result.message}")
+            template.header("BABEL SKILL", "Export Complete")
+            template.section("STATUS", f"{symbols.check_pass} {result.message}")
             if result.files_created:
-                print(f"\nFiles created: {len(result.files_created)}")
+                files_lines = [f"Files created: {len(result.files_created)}"]
                 for f in result.files_created[:5]:  # Show first 5
-                    print(f"  - {f.relative_to(self.project_dir)}")
+                    files_lines.append(f"  - {f.relative_to(self.project_dir)}")
                 if len(result.files_created) > 5:
-                    print(f"  ... and {len(result.files_created) - 5} more")
+                    files_lines.append(f"  ... and {len(result.files_created) - 5} more")
+                template.section("FILES", "\n".join(files_lines))
+            template.footer(f"{symbols.check_pass} Export complete")
+            output = template.render(command="skill", context={"exported": True})
         else:
-            print(f"\n✗ Export failed: {result.message}")
+            template.header("BABEL SKILL", "Export Failed")
+            template.section("ERROR", f"{symbols.check_fail} Export failed: {result.message}")
+            template.footer(f"{symbols.check_fail} Export failed")
+            output = template.render(command="skill", context={"error": True})
+
+        print(output)
 
     def sync(self, force: bool = False):
         """Re-export skills to all previously exported platforms."""
         result = sync_skills(self.project_dir, force=force)
+        symbols = get_symbols()
+        template = OutputTemplate(symbols=symbols)
 
         if result.success:
-            print(f"\n✓ Sync complete:\n{result.message}")
+            template.header("BABEL SKILL", "Sync Complete")
+            template.section("STATUS", f"{symbols.check_pass} Sync complete:\n{result.message}")
+            template.footer(f"{symbols.check_pass} Sync complete")
+            output = template.render(command="skill", context={"synced": True})
         else:
-            print(f"\n✗ {result.message}")
+            template.header("BABEL SKILL", "Sync Failed")
+            template.section("ERROR", f"{symbols.check_fail} {result.message}")
+            template.footer(f"{symbols.check_fail} Sync failed")
+            output = template.render(command="skill", context={"error": True})
+
+        print(output)
 
     def remove(self, target: str = None, force: bool = False):
         """
@@ -133,11 +154,21 @@ class SkillCommand:
 
         # Remove
         result = remove_skills(self.project_dir, skill_target, force=force)
+        symbols = get_symbols()
+        template = OutputTemplate(symbols=symbols)
 
         if result.success:
-            print(f"\n✓ {result.message}")
+            template.header("BABEL SKILL", "Skills Removed")
+            template.section("STATUS", f"{symbols.check_pass} {result.message}")
+            template.footer(f"{symbols.check_pass} Remove complete")
+            output = template.render(command="skill", context={"removed": True})
         else:
-            print(f"\n✗ {result.message}")
+            template.header("BABEL SKILL", "Remove Failed")
+            template.section("ERROR", f"{symbols.check_fail} {result.message}")
+            template.footer(f"{symbols.check_fail} Remove failed")
+            output = template.render(command="skill", context={"error": True})
+
+        print(output)
 
     def list_skills(self, category: str = None):
         """List available skills."""

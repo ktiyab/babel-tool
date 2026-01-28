@@ -4,6 +4,7 @@ InitCommand — Project initialization and setup
 Handles project initialization (P1 compliance):
 - Creating project with purpose grounded in need
 - Installing system prompt template
+- Installing manual files to .babel/manual/ for AI operator access
 - Outputting system prompt for LLM integration
 - Auto-detecting IDE and installing LLM-specific prompt
 - Auto-detecting CPU cores and configuring parallelization
@@ -19,6 +20,7 @@ from ..core.scope import EventScope
 from ..services.providers import get_provider_status
 from ..content import MINIMAL_SYSTEM_PROMPT, BABEL_LLM_INSTRUCTIONS
 from ..services.ide import detect_ide, get_ide_info, install_prompt, IDEType
+from ..presentation.template import OutputTemplate
 
 
 class InitCommand(BaseCommand):
@@ -60,7 +62,10 @@ class InitCommand(BaseCommand):
         # Copy system prompt template to project root
         self._install_system_prompt()
 
-        # Ensure .env files are protected from git (security: credential protection)
+        # Install manual files for AI operator access
+        manual_installed, manual_message = self._install_manual()
+
+        # Ensure .env files and .babel/manual are protected from git
         env_patterns_added, gitignore_message = self._ensure_gitignore_protection()
 
         # Auto-detect IDE and install LLM-specific prompt
@@ -69,42 +74,61 @@ class InitCommand(BaseCommand):
         # Auto-detect CPU cores and configure parallelization
         parallel_config, parallel_message = self._configure_parallelization()
 
-        print(f"Project created: {self.project_dir}")
+        # Build output with OutputTemplate
+        template = OutputTemplate(symbols=symbols)
+        template.header("BABEL INIT", "Project Initialized (P1)")
+        template.legend({
+            symbols.shared: "shared with team via git"
+        })
+
+        # PROJECT section
+        project_line = f"{symbols.shared} {self.project_dir}"
+        template.section("PROJECT", project_line)
+
+        # PURPOSE section (with optional need grounding)
         if need:
-            print(f"Need: {need}")
-            print(f"  {symbols.tree_end} Purpose: {purpose}")
+            purpose_lines = f"Need: {need}\n{symbols.tree_end} Purpose: {purpose}"
         else:
-            print(f"Purpose: {purpose}")
-            print(f"  (Consider adding --need to ground in reality)")
-        print(f"  (shared with team via git)")
+            purpose_lines = f"Purpose: {purpose}\n  (Consider adding --need to ground in reality)"
+        template.section("PURPOSE (P1)", purpose_lines)
 
-        # Show LLM status
+        # EXTRACTION section
         status = get_provider_status(self.config)
-        print(f"\nExtraction: {status}")
-
+        extraction_lines = [f"Status: {status}"]
         if not self.extractor.is_available:
-            env_key = self.config.llm.api_key_env
-            print(f"  Set {env_key} for AI-powered extraction")
-            print("  (Basic mode works fine for testing)")
+            env_key = self.config.llm.remote.api_key_env
+            extraction_lines.append(f"Set {env_key} for AI-powered extraction")
+            extraction_lines.append("(Basic mode works fine for testing)")
+        template.section("EXTRACTION", "\n".join(extraction_lines))
 
-        print(f"\nCapture thoughts with: babel capture \"your text\"")
-        print(f"Share with team:       babel capture \"text\" --share")
-        print(f"\nLLM integration:")
-        print(f"  {ide_message}")
+        # USAGE section
+        usage_lines = [
+            "babel capture \"your text\"        # Capture thoughts",
+            "babel capture \"text\" --share     # Share with team"
+        ]
+        template.section("USAGE", "\n".join(usage_lines))
 
-        # Show security status
+        # LLM INTEGRATION section
+        template.section("LLM INTEGRATION", ide_message)
+
+        # MANUAL section (conditional)
+        if manual_installed:
+            template.section("MANUAL", manual_message)
+
+        # SECURITY section (conditional)
         if env_patterns_added:
-            print(f"\nSecurity:")
-            print(f"  {gitignore_message} (prevents credential leakage)")
+            template.section("SECURITY", f"{gitignore_message} (prevents credential leakage)")
 
-        # Show parallelization status
+        # PARALLELIZATION section (conditional)
         if parallel_config:
-            print(f"\nParallelization:")
-            print(f"  {parallel_message}")
+            template.section("PARALLELIZATION", parallel_message)
 
-        # Succession hint (centralized)
-        from ..output import end_command
-        end_command("init", {})
+        template.footer(f"{symbols.shared} Project shared with team via git")
+        output = template.render(command="init", context={
+            "has_need": bool(need),
+            "extractor_available": self.extractor.is_available
+        })
+        print(output)
 
     def _install_system_prompt(self):
         """Copy system prompt template to project root."""
@@ -124,13 +148,49 @@ class InitCommand(BaseCommand):
             return
         path.write_text(MINIMAL_SYSTEM_PROMPT)
 
+    def _install_manual(self) -> tuple:
+        """
+        Copy manual files from package to .babel/manual/ for AI operator access.
+
+        AI operators need local access to command documentation regardless of
+        where the package is installed. This copies the manual files to a
+        predictable location within the project.
+
+        Returns:
+            Tuple of (files_copied: int, message: str)
+        """
+        # Find manual in package installation
+        source_dir = Path(__file__).parent.parent / "manual"
+        target_dir = self.project_dir / ".babel" / "manual"
+
+        if not source_dir.exists():
+            return 0, "Manual source not found in package"
+
+        # Create target directory if needed
+        target_dir.mkdir(parents=True, exist_ok=True)
+
+        # Copy all manual files
+        files_copied = 0
+        for source_file in source_dir.glob("*.md"):
+            target_file = target_dir / source_file.name
+            shutil.copy2(source_file, target_file)
+            files_copied += 1
+
+        if files_copied > 0:
+            return files_copied, f"Installed {files_copied} manual files to .babel/manual/"
+        else:
+            return 0, "No manual files found to install"
+
     def _ensure_gitignore_protection(self) -> tuple:
         """
-        Ensure .env files are excluded from git to prevent credential leakage.
+        Ensure .env files and .babel/manual are excluded from git.
 
         Security: Adds .env patterns to .gitignore if not already present.
         This is secure-by-default behavior - users who want .env committed
         can remove the entries (rare, discouraged).
+
+        .babel/manual/ is excluded because it's regenerable from the package
+        installation and should not be tracked in version control.
 
         Returns:
             Tuple of (entries_added: list, message: str)
@@ -138,14 +198,17 @@ class InitCommand(BaseCommand):
         gitignore_path = self.project_dir / ".gitignore"
 
         # Patterns to protect (NOT .env.example - that's a template)
-        env_patterns = [".env", ".env.local", ".env*.local"]
+        # .babel/manual/ is regenerable from package, no need to track
+        env_patterns = [".env", ".env.local", ".env*.local", ".babel/manual/"]
 
-        # If no .gitignore exists, create one with env patterns
+        # If no .gitignore exists, create one with protection patterns
         if not gitignore_path.exists():
             content = "# Environment files (contain secrets - never commit)\n"
-            content += "\n".join(env_patterns) + "\n"
+            content += ".env\n.env.local\n.env*.local\n\n"
+            content += "# Babel manual (regenerable from package)\n"
+            content += ".babel/manual/\n"
             gitignore_path.write_text(content)
-            return env_patterns, "Created .gitignore with credential protection"
+            return env_patterns, "Created .gitignore with credential and manual protection"
 
         # Read existing .gitignore
         existing_content = gitignore_path.read_text()

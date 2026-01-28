@@ -14,12 +14,13 @@ The system prompt is REQUIRED for LLMs to correctly use Babel:
 """
 
 from pathlib import Path
-from typing import Tuple, Optional
+from typing import Tuple
 
 from ..commands.base import BaseCommand
 from ..services.ide import detect_ide, get_ide_info, get_prompt_path, install_prompt, IDEType
 from ..content import BABEL_LLM_INSTRUCTIONS
 from ..presentation.symbols import safe_print
+from ..presentation.template import OutputTemplate
 from ..config import get_env_variable
 
 
@@ -150,8 +151,12 @@ class PromptCommand(BaseCommand):
 
         # Check if target exists
         if target_path.exists() and not force:
-            print(f"{symbols.check_pass} Prompt already installed: {target_path}")
-            print(f"\nTo update, use: babel prompt --install --force")
+            template = OutputTemplate(symbols=symbols)
+            template.header("BABEL PROMPT", "Already Installed")
+            template.section("STATUS", f"{symbols.check_pass} Prompt already installed: {target_path}")
+            template.section("ACTION", "To update, use: babel prompt --install --force")
+            output = template.render(command="prompt", context={"already_installed": True})
+            print(output)
             return
 
         # Install prompt
@@ -163,17 +168,27 @@ class PromptCommand(BaseCommand):
         )
 
         if success:
-            print(f"{symbols.check_pass} {message}")
-            print(f"\n{ide_name} will now use Babel's {mode_label} system prompt.")
+            template = OutputTemplate(symbols=symbols)
+            template.header("BABEL PROMPT", "Installed")
+            template.section("STATUS", f"{symbols.check_pass} {message}")
+            template.section("IDE", f"{ide_name} will now use Babel's {mode_label} system prompt.")
 
             # Show prompt source info
             if source_path.exists():
                 line_count = len(prompt_content.splitlines())
-                print(f"\nSource: {source_path.name} ({line_count} lines, {mode_label})")
+                template.section("SOURCE", f"{source_path.name} ({line_count} lines, {mode_label})")
             else:
-                print(f"\nSource: embedded fallback")
+                template.section("SOURCE", "embedded fallback")
+
+            template.footer(f"{symbols.check_pass} Prompt ready")
+            output = template.render(command="prompt", context={"installed": True, "mode": mode_label})
+            print(output)
         else:
-            print(f"{symbols.check_warn} {message}")
+            template = OutputTemplate(symbols=symbols)
+            template.header("BABEL PROMPT", "Installation Failed")
+            template.section("ERROR", f"{symbols.check_warn} {message}")
+            output = template.render(command="prompt", context={"error": True})
+            print(output)
 
     def status(self):
         """
@@ -191,31 +206,36 @@ class PromptCommand(BaseCommand):
         source_path = self._get_system_prompt_path()
         mini_path = self._get_mini_prompt_path()
 
-        print(f"\nSystem Prompt Status")
-        print(f"{'=' * 40}")
+        template = OutputTemplate(symbols=symbols)
+        template.header("BABEL PROMPT", "Status")
 
-        # IDE detection
-        print(f"\nDetected IDE: {ide_name}")
-        print(f"Prompt path:  {target_path}")
+        # IDE detection section
+        ide_lines = [
+            f"Detected IDE: {ide_name}",
+            f"Prompt path:  {target_path}"
+        ]
+        template.section("IDE", "\n".join(ide_lines))
 
-        # Installation status
+        # Installation status section
         installed_mode = None
+        status_lines = []
+
         if target_path.exists():
             installed_content = target_path.read_text(encoding='utf-8')
             installed_lines = len(installed_content.splitlines())
 
             # Detect if mini or full based on line count
-            mini_lines = len(self._get_mini_prompt_content().splitlines())
-            full_lines = len(self._get_prompt_content().splitlines())
+            mini_lines_count = len(self._get_mini_prompt_content().splitlines())
+            full_lines_count = len(self._get_prompt_content().splitlines())
 
-            if abs(installed_lines - mini_lines) < 50:
+            if abs(installed_lines - mini_lines_count) < 50:
                 installed_mode = "mini"
-            elif abs(installed_lines - full_lines) < 50:
+            elif abs(installed_lines - full_lines_count) < 50:
                 installed_mode = "full"
             else:
                 installed_mode = "custom"
 
-            print(f"Status:       {symbols.check_pass} Installed ({installed_lines} lines, {installed_mode})")
+            status_lines.append(f"{symbols.check_pass} Installed ({installed_lines} lines, {installed_mode})")
 
             # Check if up-to-date against appropriate source
             if installed_mode == "mini":
@@ -224,44 +244,56 @@ class PromptCommand(BaseCommand):
                 current_content = self._get_prompt_content()
 
             if installed_content.strip() == current_content.strip():
-                print(f"Version:      {symbols.check_pass} Up to date")
+                status_lines.append(f"{symbols.check_pass} Up to date")
             else:
-                print(f"Version:      {symbols.check_warn} Outdated (update with --force)")
+                status_lines.append(f"{symbols.check_warn} Outdated (update with --force)")
         else:
-            print(f"Status:       {symbols.check_fail} Not installed")
+            status_lines.append(f"{symbols.check_fail} Not installed")
 
-        # Skills installation status
-        print(f"\nSkills Status")
-        print(f"{'-' * 40}")
+        template.section("STATUS", "\n".join(status_lines))
+
+        # Skills installation status section
         use_mini, reason = self._should_use_mini()
         skills_target = get_env_variable(self.project_dir, "BABEL_SKILLS_TARGET") or "none"
+        skills_lines = []
         if use_mini:
-            print(f"Skills:       {symbols.check_pass} Installed ({skills_target})")
-            print(f"Recommended:  mini prompt (--mini or --auto)")
+            skills_lines.append(f"{symbols.check_pass} Installed ({skills_target})")
+            skills_lines.append(f"Recommended: mini prompt (--mini or --auto)")
         else:
-            print(f"Skills:       {symbols.check_fail} Not installed")
-            print(f"Recommended:  full prompt (default)")
+            skills_lines.append(f"{symbols.check_fail} Not installed")
+            skills_lines.append(f"Recommended: full prompt (default)")
 
-        # Source files
-        print(f"\nSource Files")
-        print(f"{'-' * 40}")
+        template.section("SKILLS", "\n".join(skills_lines))
+
+        # Source files section
         full_lines = len(self._get_prompt_content().splitlines())
         mini_lines = len(self._get_mini_prompt_content().splitlines())
-        print(f"Full:         {source_path.name} ({full_lines} lines)")
-        print(f"Mini:         {mini_path.name} ({mini_lines} lines)")
+        source_lines = [
+            f"Full: {source_path.name} ({full_lines} lines)",
+            f"Mini: {mini_path.name} ({mini_lines} lines)"
+        ]
+        template.section("SOURCE", "\n".join(source_lines))
 
-        # Actions
-        print(f"\nActions")
-        print(f"{'-' * 40}")
+        # Actions section
+        action_lines = []
         if not target_path.exists():
-            print(f"Install full: babel prompt --install")
-            print(f"Install mini: babel prompt --install --mini")
-            print(f"Auto-detect:  babel prompt --install --auto")
+            action_lines.append("Install full: babel prompt --install")
+            action_lines.append("Install mini: babel prompt --install --mini")
+            action_lines.append("Auto-detect:  babel prompt --install --auto")
         else:
-            print(f"Update full:  babel prompt --install --force")
-            print(f"Update mini:  babel prompt --install --mini --force")
-            print(f"Auto-detect:  babel prompt --install --auto --force")
-        print(f"View:         babel prompt")
+            action_lines.append("Update full:  babel prompt --install --force")
+            action_lines.append("Update mini:  babel prompt --install --mini --force")
+            action_lines.append("Auto-detect:  babel prompt --install --auto --force")
+        action_lines.append("View:         babel prompt")
+
+        template.section("ACTIONS", "\n".join(action_lines))
+
+        output = template.render(command="prompt", context={
+            "installed": target_path.exists(),
+            "mode": installed_mode,
+            "skills_installed": use_mini
+        })
+        print(output)
 
 
 # =============================================================================
